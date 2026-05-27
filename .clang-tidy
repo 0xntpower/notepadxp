@@ -1,0 +1,54 @@
+# NotepadXP clang-tidy — aligns static analysis with the HRC standard.
+# Only our own headers are checked (WTL/ATL/Windows SDK headers are excluded).
+---
+HeaderFilterRegex: '.*/src/.*'
+
+Checks: >
+  -*,
+  bugprone-*,
+  cppcoreguidelines-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  misc-*,
+  -modernize-use-trailing-return-type,
+  -modernize-avoid-c-arrays,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-pro-type-cstyle-cast,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -cppcoreguidelines-owning-memory,
+  -bugprone-easily-swappable-parameters,
+  -misc-non-private-member-variables-in-classes,
+  -modernize-use-nodiscard
+
+WarningsAsErrors: ''
+
+CheckOptions:
+  # HRC §1 — naming conventions
+  - { key: readability-identifier-naming.NamespaceCase,            value: lower_case }
+  - { key: readability-identifier-naming.ClassCase,                value: CamelCase }
+  - { key: readability-identifier-naming.StructCase,               value: CamelCase }
+  - { key: readability-identifier-naming.EnumCase,                 value: CamelCase }
+  - { key: readability-identifier-naming.EnumConstantCase,         value: CamelCase }
+  - { key: readability-identifier-naming.FunctionCase,             value: CamelCase }
+  - { key: readability-identifier-naming.MethodCase,               value: CamelCase }
+  - { key: readability-identifier-naming.ParameterCase,            value: camelBack }
+  - { key: readability-identifier-naming.LocalVariableCase,        value: camelBack }
+  - { key: readability-identifier-naming.MemberCase,               value: camelBack }
+  - { key: readability-identifier-naming.PrivateMemberSuffix,      value: _ }
+  - { key: readability-identifier-naming.ProtectedMemberSuffix,    value: _ }
+  - { key: readability-identifier-naming.ConstexprVariableCase,    value: CamelCase }
+  - { key: readability-identifier-naming.ConstexprVariablePrefix,  value: k }
+  - { key: readability-identifier-naming.GlobalConstantCase,       value: CamelCase }
+  - { key: readability-identifier-naming.GlobalConstantPrefix,     value: k }
+  - { key: readability-identifier-naming.StaticConstantCase,       value: CamelCase }
+  - { key: readability-identifier-naming.StaticConstantPrefix,     value: k }
+  # HRC §1.3 — interfaces carry an I prefix
+  - { key: readability-identifier-naming.AbstractClassPrefix,      value: I }

@@ -1,0 +1,50 @@
+# NotepadXP clang-format — enforces HRC §9 (Code Style).
+# 4-space indent, no tabs, attach braces, 100-col preferred / 120 hard limit.
+---
+Language:        Cpp
+BasedOnStyle:    Google
+Standard:        c++20
+
+# HRC §9.1 — indentation
+IndentWidth:     4
+TabWidth:        4
+UseTab:          Never
+ContinuationIndentWidth: 4
+AccessModifierOffset: -4
+
+# HRC §9.1 — opening brace on the same line, closing brace on its own line
+BreakBeforeBraces: Attach
+
+# HRC §9.2 — line length
+ColumnLimit:     100
+
+# Pointers/references bind to the type (Win32/HRC idiom: HANDLE* h, const T& x)
+PointerAlignment: Left
+DerivePointerAlignment: false
+
+# Keep short constructs readable but not collapsed
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: false
+
+NamespaceIndentation: None
+FixNamespaceComments: true
+CompactNamespaces: false
+
+SortIncludes: false        # include ordering is grouped manually per HRC §2.4
+IncludeBlocks: Preserve
+
+AlignAfterOpenBracket: Align
+AlignTrailingComments: true
+SpacesBeforeTrailingComments: 2
+BinPackParameters: false
+BinPackArguments: false
+AllowAllParametersOfDeclarationOnNextLine: false
+AllowAllArgumentsOnNextLine: false
+
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+SpaceAfterCStyleCast: false
+Cpp11BracedListStyle: true

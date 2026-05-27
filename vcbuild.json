@@ -1,0 +1,86 @@
+{
+  "$comment": "NotepadXP build config. WTL is vendored under extern/wtl/include; ATL (atlbase.h/atlwin.h) comes from the MSVC environment (vcvarsall puts ATLMFC\\include on INCLUDE). HRC requires /W4 /WX (warnings.as_errors); ATL/WTL header noise is isolated behind src/WtlIncludes.hpp via #pragma warning(push,3). Any warning numbers in 'disabled' are deliberate exceptions.",
+
+  "project": {
+    "name": "notepadxp",
+    "type": "exe",
+    "output_dir": "build",
+    "architecture": "x64",
+    "output_name": "notepadxp.exe"
+  },
+
+  "compiler": {
+    "standard": "c++20",
+    "runtime": "dynamic",
+    "char_set": "unicode",
+    "exceptions": true,
+    "rtti": true,
+    "parallel": true,
+    "defines": [
+      "WIN32_LEAN_AND_MEAN",
+      "NOMINMAX",
+      "STRICT",
+      "UNICODE",
+      "_UNICODE"
+    ],
+    "warnings": {
+      "level": 4,
+      "as_errors": true,
+      "disabled": []
+    },
+    "conformance": {
+      "permissive": false
+    },
+    "security": {
+      "buffer_checks": true
+    }
+  },
+
+  "linker": {
+    "subsystem": "windows",
+    "libraries": [
+      "user32.lib",
+      "gdi32.lib",
+      "comdlg32.lib",
+      "comctl32.lib",
+      "shell32.lib",
+      "advapi32.lib",
+      "winspool.lib",
+      "ole32.lib"
+    ],
+    "security": {
+      "aslr": true,
+      "dep": true
+    }
+  },
+
+  "sources": {
+    "include_dirs": ["src", "res", "extern/wtl/include"],
+    "source_dirs": ["src"],
+    "extensions": [".cpp"],
+    "exclude_patterns": []
+  },
+
+  "$pch_note": "PCH is disabled: vcbuild compiles the PCH without the project 'defines'/warning flags, which MSVC rejects as inconsistent with the consuming TUs, and it applies /Yu with no force-include. WTL-using TUs include src/WtlIncludes.hpp directly instead.",
+  "pch": {
+    "enabled": false
+  },
+
+  "resources": {
+    "enabled": true,
+    "files": ["res/Notepad.rc"]
+  },
+
+  "profiles": {
+    "debug": {
+      "compiler": {
+        "defines": ["_DEBUG"]
+      }
+    },
+    "release": {
+      "compiler": {
+        "defines": ["NDEBUG"]
+      }
+    }
+  }
+}

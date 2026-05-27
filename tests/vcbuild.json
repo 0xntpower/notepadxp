@@ -1,0 +1,32 @@
+{
+  "$comment": "Standalone unit-test build for NotepadXP's pure logic. Tests.cpp includes the implementation .cpp files directly; include_dirs point back at ../src and ../res. Run from this directory: python ../../vcbuild/vcbuild.py",
+
+  "project": {
+    "name": "notepadxp_tests",
+    "type": "exe",
+    "output_dir": "build",
+    "architecture": "x64",
+    "output_name": "notepadxp_tests.exe"
+  },
+
+  "compiler": {
+    "standard": "c++20",
+    "char_set": "unicode",
+    "exceptions": true,
+    "defines": ["WIN32_LEAN_AND_MEAN", "NOMINMAX", "STRICT", "UNICODE", "_UNICODE"],
+    "warnings": {
+      "level": 4,
+      "as_errors": false
+    }
+  },
+
+  "linker": {
+    "subsystem": "console",
+    "libraries": ["user32.lib", "advapi32.lib"]
+  },
+
+  "sources": {
+    "include_dirs": [".", "../src", "../res"],
+    "source_dirs": ["."]
+  }
+}

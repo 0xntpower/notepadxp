@@ -1,0 +1,115 @@
+#pragma once
+
+// EditView.hpp — Wraps the multiline edit control that is Notepad's text area.
+
+#include <string>
+#include <string_view>
+
+#include "WtlIncludes.hpp"
+#include "editor/EditKeyHandler.hpp"
+#include "editor/UndoManager.hpp"
+#include "util/GdiGuard.hpp"
+
+namespace notepadxp::editor {
+
+/// @brief Owns and drives the child Edit control: creation, font, word-wrap
+///        recreation, the clipboard/undo commands, and caret position queries.
+/// @threadsafety Not thread-safe; lives on and is used from the UI thread only.
+///
+/// Word wrap cannot be toggled on a live Edit control, so SetWordWrap()
+/// destroys and recreates the control (preserving text, font, modify flag and
+/// caret) exactly as classic Notepad does.
+class EditView final {
+public:
+    EditView() = default;
+
+    EditView(const EditView&) = delete;
+    EditView& operator=(const EditView&) = delete;
+
+    /// @brief Create the Edit control as a child of @p parent.
+    /// @param wordWrap Initial word-wrap state (omits WS_HSCROLL when true).
+    /// @return true on success.
+    [[nodiscard]] bool Create(HWND parent, bool wordWrap);
+
+    /// @brief Position the control to fill @p rect (client coordinates).
+    void Layout(const RECT& rect);
+
+    /// @brief Give keyboard focus to the edit control.
+    void SetFocusToEdit();
+
+    [[nodiscard]] HWND Handle() const noexcept {
+        return edit_.m_hWnd;
+    }
+
+    /// @brief Toggle word wrap, recreating the control. @return true on success;
+    ///        on failure the previous control and state are left intact.
+    [[nodiscard]] bool SetWordWrap(bool wordWrap);
+
+    /// @brief Apply a fully-resolved font (lfHeight already set for the display).
+    void SetFont(const LOGFONTW& logFont);
+
+    // Edit commands (mapped from the Edit menu / accelerators).
+    void Undo();
+    void Redo();
+    void Cut();
+    void Copy();
+    void Paste();
+    void DeleteSelection();
+    void SelectAll();
+
+    /// @brief Replace the current selection with @p text as a single undo unit.
+    void InsertText(std::wstring_view text);
+
+    /// @brief Record the latest edit into the undo history (call on EN_CHANGE).
+    void OnEditChanged();
+
+    /// @brief Move the caret to the start of 1-based @p lineNumber and scroll it
+    ///        into view. Out-of-range values are clamped by the control.
+    void GoToLine(int lineNumber);
+
+    /// @brief Clear all text and the modify flag (the File > New action).
+    void Reset();
+
+    /// @brief Replace all text with @p text, clear the modify flag, home the caret.
+    void SetText(std::wstring_view text);
+
+    /// @brief Return the full document text.
+    [[nodiscard]] std::wstring GetText();
+
+    /// @brief Move the caret to end of buffer and scroll into view (.LOG stamp).
+    void MoveCaretToEnd();
+
+    /// @brief Read the current selection as character indices [start, end).
+    void GetSelection(int& startOut, int& endOut);
+
+    /// @brief Select [start, end) and scroll the caret into view.
+    void SelectRange(int start, int end);
+
+    // State queries used to drive menu enable/check state and the status bar.
+    // These are not const because the underlying WTL/CEdit accessors send window
+    // messages and are not const-qualified.
+    [[nodiscard]] bool CanUndo();
+    [[nodiscard]] bool CanRedo();
+    [[nodiscard]] bool HasSelection();
+    [[nodiscard]] int TextLength();
+    [[nodiscard]] bool IsModified();
+    void SetModified(bool modified);
+
+    /// @brief Compute the 1-based caret line and column from the selection start.
+    void GetCaretLineCol(int& lineOut, int& colOut);
+
+private:
+    [[nodiscard]] static DWORD StyleFor(bool wordWrap) noexcept;
+    void ReapplyFont();
+    void ApplySnapshot(const EditSnapshot& snapshot);
+
+    CEdit edit_;
+    EditKeyHandler keyHandler_;  // Subclasses edit_ for the word-delete shortcuts.
+    UndoManager undo_;
+    util::GdiGuard fontGuard_;  // Owns the current HFONT.
+    bool wordWrap_ = false;
+    bool suppressRecording_ = false;  // True while we change text programmatically.
+    HWND parent_ = nullptr;
+};
+
+} // namespace notepadxp::editor

@@ -1,0 +1,277 @@
+// Notepad.rc — NotepadXP resources.
+//
+// Menus, accelerators, dialogs, and string-table text for the classic Notepad
+// UI; resource IDs use the values defined in Resource.h.
+
+#include <windows.h>
+#include "Resource.h"
+
+/////////////////////////////////////////////////////////////////////////////
+// Icons
+//
+// Icon id 1 is the lowest-numbered icon resource, so Explorer uses it as the
+// executable's display icon; it is also loaded as the main window icon.
+ID_APPICON  ICON  "Notepad.ico"
+
+/////////////////////////////////////////////////////////////////////////////
+// Menu
+
+ID_MENUBAR MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "&New\tCtrl+N",            M_NEW
+        MENUITEM "&Open...\tCtrl+O",        M_OPEN
+        MENUITEM "&Save\tCtrl+S",           M_SAVE
+        MENUITEM "Save &As...",             M_SAVEAS
+        MENUITEM SEPARATOR
+        MENUITEM "Page Set&up...",          M_PAGESETUP
+        MENUITEM "&Print...\tCtrl+P",       M_PRINT
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit",                   M_EXIT
+    END
+    POPUP "&Edit"
+    BEGIN
+        MENUITEM "&Undo\tCtrl+Z",           M_UNDO
+        MENUITEM "&Redo\tCtrl+Y",           M_REDO
+        MENUITEM SEPARATOR
+        MENUITEM "Cu&t\tCtrl+X",            M_CUT,      GRAYED
+        MENUITEM "&Copy\tCtrl+C",           M_COPY,     GRAYED
+        MENUITEM "&Paste\tCtrl+V",          M_PASTE,    GRAYED
+        MENUITEM "De&lete\tDel",            M_DELETE,   GRAYED
+        MENUITEM SEPARATOR
+        MENUITEM "&Find...\tCtrl+F",        M_FIND
+        MENUITEM "Find &Next\tF3",          M_FINDNEXT
+        MENUITEM "&Replace...\tCtrl+H",     M_REPLACE
+        MENUITEM "&Go To...\tCtrl+G",       M_GOTO
+        MENUITEM SEPARATOR
+        MENUITEM "Select &All\tCtrl+A",     M_SELECTALL
+        MENUITEM "Time/&Date\tF5",          M_DATETIME
+    END
+    POPUP "F&ormat"
+    BEGIN
+        MENUITEM "&Word Wrap",              M_WORDWRAP
+        MENUITEM "&Font...",                M_SETFONT
+    END
+    POPUP "&View"
+    BEGIN
+        MENUITEM "&Status Bar",             M_STATUSBAR
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&Help Topics",            M_HELP
+        MENUITEM SEPARATOR
+        MENUITEM "&About Notepad",          M_ABOUT
+    END
+END
+
+/////////////////////////////////////////////////////////////////////////////
+// Accelerators
+
+ID_ACCEL ACCELERATORS
+BEGIN
+    "N",        M_NEW,          VIRTKEY, CONTROL
+    "O",        M_OPEN,         VIRTKEY, CONTROL
+    "S",        M_SAVE,         VIRTKEY, CONTROL
+    "P",        M_PRINT,        VIRTKEY, CONTROL
+    VK_INSERT,  M_COPY,         VIRTKEY, CONTROL
+    VK_F1,      M_HELP,         VIRTKEY
+    VK_F3,      M_FINDNEXT,     VIRTKEY
+    VK_F5,      M_DATETIME,     VIRTKEY
+    "G",        M_GOTO,         VIRTKEY, CONTROL
+    "F",        M_FIND,         VIRTKEY, CONTROL, NOINVERT
+    "H",        M_REPLACE,      VIRTKEY, CONTROL, NOINVERT
+    VK_BACK,    M_UNDO,         VIRTKEY, ALT
+    "Z",        M_UNDO,         VIRTKEY, CONTROL
+    "Y",        M_REDO,         VIRTKEY, CONTROL
+    "X",        M_CUT,          VIRTKEY, CONTROL
+    "C",        M_COPY,         VIRTKEY, CONTROL
+    "V",        M_PASTE,        VIRTKEY, CONTROL
+    "A",        M_SELECTALL,    VIRTKEY, CONTROL
+END
+
+/////////////////////////////////////////////////////////////////////////////
+// String table (classic Notepad message strings)
+
+STRINGTABLE
+BEGIN
+    IDS_MERGE1          "%%"
+    IDS_DISKERROR       "Cannot open the %% file.\n\nMake sure a disk is in the drive you specified."
+    IDS_FNF             "Cannot find the %% file.\n\nDo you want to create a new file?"
+    IDS_SCBC            "The text in the %% file has changed.\n\nDo you want to save the changes?"
+    IDS_UNTITLED        "Untitled"
+    IDS_NOTEPAD         " - Notepad"
+    IDS_CFS             "Cannot find ""%%"""
+    IDS_ERRSPACE        "Not enough memory available to complete this operation. Quit one or more applications to increase available memory, and then try again."
+    IDS_FTL             "The %% file is too large for Notepad.\n\nUse another editor to edit the file."
+    IDS_NN              "Notepad"
+    IDS_COMMDLGINIT     "Failed to Initialize File Dialogs. Change the Filename and try again."
+    IDS_PRINTDLGINIT    "Failed to Initialize Print Dialogs. Make sure that your printer is connected properly and use Control Panel to verify that the printer is configured properly."
+    IDS_CANTPRINT       "Cannot print the %% file. Be sure that your printer is connected properly and use Control Panel to verify that the printer is configured properly."
+    IDS_NVF             "Not a valid file name."
+    IDS_CREATEERR       "Cannot create the %% file.\n\nMake sure that the path and filename are correct."
+    IDS_NOWW            "Cannot carry out the Word Wrap command because there is too much text in the file."
+    IDS_HELPFILE        "notepad.hlp"
+    IDS_HEADER          "&f"
+    IDS_FOOTER          "Page &p"
+    IDS_ACCESSDENY      "%%\nYou do not have permission to open this file.  See the owner of the file or an administrator to obtain permission."
+    IDS_ANSITEXT        "Text Documents (*.txt)"
+    IDS_ALLFILES        "All Files "
+    IDS_OPENCAPTION     "Open"
+    IDS_SAVECAPTION     "Save As"
+    IDS_CANNOTQUIT      "You cannot quit Windows because the Save As dialog\nbox in Notepad is open.  Switch to Notepad, close this\ndialog box, and then try quitting Windows again."
+    IDS_LOADDRVFAIL     "Cannot access your printer.\nBe sure that your printer is connected properly and use Control Panel to verify that the printer is configured properly."
+    IDS_ERRUNICODE      "%%\n This file contains characters in Unicode format which will be lost if you save this file as an ANSI encoded text file. To keep the Unicode information, click Cancel below and then select one of the Unicode options from the Encoding drop down list. Continue?"
+    IDS_FONTTOOBIG      "Page too small to print one line.\nTry printing using smaller font."
+    IDS_COMMDLGERR      "Common Dialog error (0x%04x)"
+    IDS_LINEERROR       "Notepad - Goto Line"
+    IDS_LINETOOLARGE    "Line number out of range"
+    IDS_FT_ANSI         "ANSI"
+    IDS_FT_UNICODE      "Unicode"
+    IDS_FT_UNICODEBE    "Unicode big endian"
+    IDS_FT_UTF8         "UTF-8"
+    IDS_CURRENT_PAGE    "Page %d"
+    IDS_LINECOL         "   Ln %d, Col %d  "
+    IDS_COMPRESSED_FILE " Compressed,"
+    IDS_ENCRYPTED_FILE  " Encrypted,"
+    IDS_HIDDEN_FILE     " Hidden,"
+    IDS_OFFLINE_FILE    " Offline,"
+    IDS_READONLY_FILE   " ReadOnly,"
+    IDS_SYSTEM_FILE     " System,"
+    IDS_FILE            " File"
+    IDS_TEXT_FRIENDLY_NAME "Text Document"
+    // Header/footer formatting letters, in order:
+    // File, Page, Time, Date, Center, Right, Left (this string is localizable).
+    IDS_LETTERS         "fFpPtTdDcCrRlL"
+END
+
+/////////////////////////////////////////////////////////////////////////////
+// Dialogs
+
+// Modeless "Now Printing" abort dialog.
+IDD_ABORTPRINT DIALOG 20, 20, 200, 64
+STYLE WS_POPUPWINDOW | DS_MODALFRAME | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
+CAPTION "Notepad"
+FONT 8, "MS Shell Dlg"
+BEGIN
+    DEFPUSHBUTTON   "Cancel",   IDCANCEL,       84, 44, 32, 14, WS_GROUP
+    CTEXT           "Now Printing", -1,          0,  8, 200, 8
+    CTEXT           "",         ID_FILENAME,      0, 18, 200, 8, SS_PATHELLIPSIS | SS_CENTER
+    CTEXT           "",         ID_PAGENUMBER,    0, 28, 200, 8, SS_CENTER
+END
+
+// Child template merged into the Open/Save common dialog to add an encoding combo.
+NpEncodingDialog DIALOG 30, 17, 300, 22
+STYLE WS_CHILD | DS_3DLOOK | WS_CLIPSIBLINGS | DS_CONTEXTHELP | DS_CONTROL
+FONT 8, "MS Shell Dlg"
+BEGIN
+    LTEXT           "&Encoding:", IDC_ENCODING,  68, 1, 40, 12
+    COMBOBOX        IDC_FILETYPE,               130, 0, 164, 100,
+                    CBS_DROPDOWNLIST | WS_VSCROLL | WS_GROUP | WS_TABSTOP
+END
+
+// Page Setup. The numeric control IDs are the standard <dlgs.h> values expected
+// by the common Page Setup dialog; ID_HEADER/ID_FOOTER are our additions.
+IDD_PAGESETUP DIALOG DISCARDABLE 0, 0, 356, 196
+STYLE DS_MODALFRAME | 4L | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU | DS_CONTEXTHELP
+CAPTION "Page Setup"
+FONT 8, "MS Shell Dlg"
+BEGIN
+    GROUPBOX        "Paper", 1073, 8, 8, 224, 56, WS_GROUP
+    LTEXT           "Si&ze:", 1089, 16, 24, 36, 8
+    COMBOBOX        1137, 64, 23, 160, 160, CBS_DROPDOWNLIST | CBS_SORT | WS_VSCROLL | WS_GROUP | WS_TABSTOP
+    LTEXT           "&Source:", 1090, 16, 45, 36, 8
+    COMBOBOX        1138, 64, 42, 160, 160, CBS_DROPDOWNLIST | CBS_SORT | WS_VSCROLL | WS_GROUP | WS_TABSTOP
+    GROUPBOX        "Orientation", 1072, 8, 69, 64, 56, WS_GROUP
+    CONTROL         "P&ortrait", 1056, "Button", BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP, 16, 82, 52, 12
+    CONTROL         "L&andscape", 1057, "Button", BS_AUTORADIOBUTTON, 16, 103, 52, 12
+    GROUPBOX        "Margins", 1075, 80, 69, 152, 56, WS_GROUP
+    LTEXT           "&Left:", 1102, 88, 85, 32, 8
+    EDITTEXT        1155, 120, 82, 28, 12, WS_GROUP
+    LTEXT           "&Right:", 1103, 164, 85, 32, 8
+    EDITTEXT        1157, 196, 82, 28, 12, WS_GROUP
+    LTEXT           "&Top:", 1104, 88, 104, 32, 8
+    EDITTEXT        1156, 120, 103, 28, 12, WS_GROUP
+    LTEXT           "&Bottom:", 1105, 164, 104, 32, 8
+    EDITTEXT        1158, 196, 103, 28, 12, WS_GROUP
+    LTEXT           "&Header:", ID_HEADER_LABEL, 8, 135, 29, 8
+    EDITTEXT        ID_HEADER, 56, 134, 174, 12, ES_AUTOHSCROLL
+    LTEXT           "&Footer:", ID_FOOTER_LABEL, 8, 154, 29, 8
+    EDITTEXT        ID_FOOTER, 56, 153, 174, 12, ES_AUTOHSCROLL
+    DEFPUSHBUTTON   "OK", IDOK, 190, 174, 50, 14, WS_GROUP
+    PUSHBUTTON      "Cancel", IDCANCEL, 244, 174, 50, 14
+    PUSHBUTTON      "&Printer...", 1026, 298, 174, 50, 14
+    GROUPBOX        "Preview", -1, 240, 8, 108, 158
+    CONTROL         "", 1080, "Static", SS_WHITERECT, 254, 46, 80, 80
+    CONTROL         "", 1081, "Static", SS_GRAYRECT, 334, 50, 4, 80
+    CONTROL         "", 1082, "Static", SS_GRAYRECT, 262, 122, 80, 4
+END
+
+// Go To line.
+IDD_GOTODIALOG DIALOG DISCARDABLE 0, 0, 180, 57
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_CONTEXTHELP
+CAPTION "Goto line"
+FONT 8, "MS Shell Dlg"
+BEGIN
+    LTEXT           "&Line Number:", IDC_GOTO_LABEL, 7, 9, 50, 10
+    EDITTEXT        IDC_GOTO, 55, 7, 57, 12, ES_AUTOHSCROLL | ES_NUMBER
+    DEFPUSHBUTTON   "OK", IDOK, 7, 34, 50, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 78, 34, 50, 14
+END
+
+// About NotepadXP. (Keep the version line in sync with VERSIONINFO below.)
+IDD_ABOUT DIALOG DISCARDABLE 0, 0, 220, 100
+STYLE DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "About NotepadXP"
+FONT 8, "MS Shell Dlg"
+BEGIN
+    ICON            ID_APPICON, -1, 14, 16, 20, 20
+    LTEXT           "NotepadXP", -1, 46, 16, 160, 10
+    LTEXT           "Version 1.0", -1, 46, 28, 160, 10
+    LTEXT           "A faithful recreation of the classic Windows Notepad in modern C++20.",
+                    -1, 14, 50, 192, 18
+    LTEXT           "Copyright \251 2026 ntpower", -1, 14, 72, 192, 10
+    DEFPUSHBUTTON   "OK", IDOK, 161, 80, 45, 14, WS_GROUP
+END
+
+/////////////////////////////////////////////////////////////////////////////
+// Version
+
+VS_VERSION_INFO VERSIONINFO
+    FILEVERSION    1, 0, 0, 0
+    PRODUCTVERSION 1, 0, 0, 0
+    FILEFLAGSMASK  0x3fL
+#ifdef _DEBUG
+    FILEFLAGS      0x1L
+#else
+    FILEFLAGS      0x0L
+#endif
+    FILEOS         0x40004L
+    FILETYPE       0x1L
+    FILESUBTYPE    0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName",      "NotepadXP project"
+            VALUE "FileDescription",  "Notepad"
+            VALUE "FileVersion",      "1.0.0.0"
+            VALUE "InternalName",     "Notepad"
+            VALUE "LegalCopyright",   "NotepadXP. A faithful, clean-room recreation of the classic Notepad."
+            VALUE "OriginalFilename", "notepadxp.exe"
+            VALUE "ProductName",      "NotepadXP"
+            VALUE "ProductVersion",   "1.0.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
+
+/////////////////////////////////////////////////////////////////////////////
+// Application manifest (DPI awareness + asInvoker; intentionally NO ComCtl32
+// v6 dependency, so controls render in the classic XP/2000 3D style).
+
+1 RT_MANIFEST "Notepad.manifest"
