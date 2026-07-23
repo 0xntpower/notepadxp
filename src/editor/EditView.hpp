@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "WtlIncludes.hpp"
+#include "editor/DocumentShadow.hpp"
 #include "editor/EditKeyHandler.hpp"
 #include "editor/UndoManager.hpp"
 #include "file/TextBuffer.hpp"
@@ -114,6 +115,7 @@ public:
 
 private:
     void NotifyCaretMaybeMoved();
+    void OnPreChange(PendingChange pending);
 
     [[nodiscard]] static DWORD StyleFor(bool wordWrap) noexcept;
     void ReapplyFont();
@@ -127,11 +129,7 @@ private:
     std::function<void()> caretMoved_;
     int lastCaretLine_ = 0;  // Dedupe cache for caret notifications (0 == none yet).
     int lastCaretCol_ = 0;
-    // Temporary bridge until DocumentShadow lands: previous full text +
-    // selection, diffed on EN_CHANGE to produce the undo delta.
-    std::wstring bridgeText_;
-    int bridgeSelStart_ = 0;
-    int bridgeSelEnd_ = 0;
+    DocumentShadow shadow_;  // Mirrors the control text; derives undo deltas.
     bool wordWrap_ = false;
     bool suppressRecording_ = false;  // True while we change text programmatically.
     HWND parent_ = nullptr;

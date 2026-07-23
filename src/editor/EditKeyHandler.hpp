@@ -7,13 +7,19 @@
 // The bare control inserts a 0x7F "box" for Ctrl+Backspace and ignores
 // Ctrl+Delete, so both are handled here and the stray 0x7F WM_CHAR is swallowed.
 //
-// The subclass is also the seam through which caret movement is observed: every
-// message that can move the caret (keys, mouse, EM_SETSEL) is let through to
-// the control first and then reported via the caret-notify callback.
+// The subclass is also the seam through which the rest of the editor observes
+// the control:
+//   * caret movement — every message that can move the caret is let through
+//     first and then reported via the caret-notify callback;
+//   * Ctrl+wheel — reported as zoom steps and swallowed;
+//   * mutations — before any message that changes text, a PendingChange
+//     prediction (what will be removed/inserted) is reported so the document
+//     shadow can derive deltas without re-reading the buffer.
 
 #include <functional>
 
 #include "WtlIncludes.hpp"
+#include "editor/DocumentShadow.hpp"  // PendingChange.
 
 namespace notepadxp::editor {
 
@@ -38,6 +44,12 @@ public:
         wheelZoomNotify_ = std::move(notify);
     }
 
+    /// @brief Register the listener fired just before a mutating message is
+    ///        forwarded to the control.
+    void SetPreChangeNotify(std::function<void(PendingChange)> notify) {
+        preChangeNotify_ = std::move(notify);
+    }
+
     BEGIN_MSG_MAP(EditKeyHandler)
         MESSAGE_HANDLER(WM_KEYDOWN, OnKeyDown)
         MESSAGE_HANDLER(WM_CHAR, OnChar)
@@ -46,6 +58,12 @@ public:
         MESSAGE_HANDLER(WM_MOUSEMOVE, OnMouseMove)
         MESSAGE_HANDLER(WM_MOUSEWHEEL, OnMouseWheel)
         MESSAGE_HANDLER(EM_SETSEL, OnCaretMessage)
+        MESSAGE_HANDLER(EM_REPLACESEL, OnReplaceSel)
+        MESSAGE_HANDLER(WM_PASTE, OnMutatingMessage)
+        MESSAGE_HANDLER(WM_CUT, OnMutatingMessage)
+        MESSAGE_HANDLER(WM_CLEAR, OnMutatingMessage)
+        MESSAGE_HANDLER(WM_UNDO, OnMutatingMessage)
+        MESSAGE_HANDLER(EM_UNDO, OnMutatingMessage)
     END_MSG_MAP()
 
 private:
@@ -54,13 +72,17 @@ private:
     LRESULT OnCaretMessage(UINT message, WPARAM wParam, LPARAM lParam, BOOL& handled);
     LRESULT OnMouseMove(UINT message, WPARAM wParam, LPARAM lParam, BOOL& handled);
     LRESULT OnMouseWheel(UINT message, WPARAM wParam, LPARAM lParam, BOOL& handled);
+    LRESULT OnReplaceSel(UINT message, WPARAM wParam, LPARAM lParam, BOOL& handled);
+    LRESULT OnMutatingMessage(UINT message, WPARAM wParam, LPARAM lParam, BOOL& handled);
 
     void DeleteWordLeft();
     void DeleteWordRight();
     void NotifyCaret();
+    void NotifyPreChange(PendingChange::Kind kind, std::wstring inserted = {});
 
     std::function<void()> caretNotify_;
     std::function<void(int)> wheelZoomNotify_;
+    std::function<void(PendingChange)> preChangeNotify_;
     int wheelRemainder_ = 0;  // Accumulates sub-notch deltas from fine-scroll wheels.
 };
 

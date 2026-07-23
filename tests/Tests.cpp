@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "editor/DocumentShadow.cpp"
 #include "editor/SearchEngine.cpp"
 #include "editor/UndoManager.cpp"
 #include "file/Encoding.cpp"
@@ -612,6 +613,152 @@ void TestUndoManager() {
     }
 }
 
+notepadxp::editor::PendingChange Pending(notepadxp::editor::PendingChange::Kind kind, int selStart,
+                                         int selEnd, std::wstring inserted = {}) {
+    notepadxp::editor::PendingChange p;
+    p.kind = kind;
+    p.selStart = selStart;
+    p.selEnd = selEnd;
+    p.inserted = std::move(inserted);
+    return p;
+}
+
+void TestDocumentShadow() {
+    using notepadxp::editor::DocumentShadow;
+    using Kind = notepadxp::editor::PendingChange::Kind;
+
+    // A reader that must not be consulted on the fast path: returns a poison
+    // value that would corrupt the shadow if the fallback ran.
+    const std::function<std::wstring()> poison = [] { return std::wstring(L"POISON"); };
+
+    // Unmaterialized capture: materializes, yields no delta.
+    {
+        DocumentShadow s;
+        CHECK(!s.IsMaterialized());
+        CHECK(!s.CaptureChange(5, 5, 5, [] { return std::wstring(L"hello"); }).has_value());
+        CHECK(s.IsMaterialized());
+        CHECK(s.Text() == L"hello");
+        CHECK(s.FallbackCount() == 0);
+    }
+
+    // Typed char at the caret.
+    {
+        DocumentShadow s;
+        s.Materialize(L"hello");
+        s.SetPending(Pending(Kind::ReplaceSelection, 5, 5, L"X"));
+        const auto d = s.CaptureChange(6, 6, 6, poison);
+        CHECK(d.has_value());
+        CHECK(d->pos == 5);
+        CHECK(d->inserted == L"X");
+        CHECK(d->removed.empty());
+        CHECK(d->charBeforePos == L'o');
+        CHECK(s.Text() == L"helloX");
+        CHECK(s.FallbackCount() == 0);
+    }
+
+    // Typing over a selection.
+    {
+        DocumentShadow s;
+        s.Materialize(L"hello");
+        s.SetPending(Pending(Kind::ReplaceSelection, 0, 5, L"Hi"));
+        const auto d = s.CaptureChange(2, 2, 2, poison);
+        CHECK(d.has_value());
+        CHECK(d->removed == L"hello");
+        CHECK(d->inserted == L"Hi");
+        CHECK(s.Text() == L"Hi");
+    }
+
+    // Backspace, with and without a selection.
+    {
+        DocumentShadow s;
+        s.Materialize(L"hello");
+        s.SetPending(Pending(Kind::BackspaceOne, 5, 5));
+        const auto d = s.CaptureChange(4, 4, 4, poison);
+        CHECK(d.has_value());
+        CHECK(d->pos == 4);
+        CHECK(d->removed == L"o");
+        s.SetPending(Pending(Kind::BackspaceOne, 1, 3));
+        const auto d2 = s.CaptureChange(2, 1, 1, poison);
+        CHECK(d2.has_value());
+        CHECK(d2->pos == 1);
+        CHECK(d2->removed == L"el");
+        CHECK(s.Text() == L"hl");
+    }
+
+    // Forward delete.
+    {
+        DocumentShadow s;
+        s.Materialize(L"hello");
+        s.SetPending(Pending(Kind::DeleteOne, 0, 0));
+        const auto d = s.CaptureChange(4, 0, 0, poison);
+        CHECK(d.has_value());
+        CHECK(d->pos == 0);
+        CHECK(d->removed == L"h");
+        CHECK(s.Text() == L"ello");
+    }
+
+    // Multi-line paste over a selection.
+    {
+        DocumentShadow s;
+        s.Materialize(L"abcdef");
+        s.SetPending(Pending(Kind::ReplaceSelection, 2, 4, L"XY\r\nZ"));
+        const auto d = s.CaptureChange(9, 7, 7, poison);
+        CHECK(d.has_value());
+        CHECK(d->removed == L"cd");
+        CHECK(d->inserted == L"XY\r\nZ");
+        CHECK(s.Text() == L"abXY\r\nZef");
+        CHECK(s.FallbackCount() == 0);
+    }
+
+    // Arithmetic mismatch (stale prediction) resyncs via the fallback diff.
+    {
+        DocumentShadow s;
+        s.Materialize(L"abc");
+        s.SetPending(Pending(Kind::ReplaceSelection, 0, 0, L"Q"));
+        const auto d = s.CaptureChange(7, 7, 7, [] { return std::wstring(L"abcdefg"); });
+        CHECK(d.has_value());
+        CHECK(d->pos == 3);
+        CHECK(d->inserted == L"defg");
+        CHECK(s.FallbackCount() == 1);
+        CHECK(s.Text() == L"abcdefg");
+    }
+
+    // Unknown prediction and missing prediction both fall back.
+    {
+        DocumentShadow s;
+        s.Materialize(L"abc");
+        s.SetPending(Pending(Kind::Unknown, 0, 0));
+        CHECK(s.CaptureChange(4, 4, 4, [] { return std::wstring(L"abcd"); }).has_value());
+        CHECK(s.FallbackCount() == 1);
+        CHECK(s.CaptureChange(5, 5, 5, [] { return std::wstring(L"abcde"); }).has_value());
+        CHECK(s.FallbackCount() == 2);
+        CHECK(s.Text() == L"abcde");
+    }
+
+    // Pasting text identical to the selection records nothing.
+    {
+        DocumentShadow s;
+        s.Materialize(L"abc");
+        s.SetPending(Pending(Kind::ReplaceSelection, 0, 3, L"abc"));
+        CHECK(!s.CaptureChange(3, 3, 3, poison).has_value());
+        CHECK(s.FallbackCount() == 0);
+        CHECK(s.Text() == L"abc");
+    }
+
+    // External splices (undo/redo) and follow-tail appends keep the mirror honest.
+    {
+        DocumentShadow s;
+        s.Materialize(L"hello world");
+        s.ApplyExternal(0, 5, L"goodbye");
+        CHECK(s.Text() == L"goodbye world");
+        s.Append(L"!!");
+        CHECK(s.Text() == L"goodbye world!!");
+        s.Reset();
+        CHECK(!s.IsMaterialized());
+        CHECK(s.Length() == 0);
+    }
+}
+
 void TestCommandLine() {
     using notepadxp::util::ParseCommandLine;
 
@@ -649,6 +796,7 @@ int main() {
     TestFileService();
     TestSearchEngine();
     TestUndoManager();
+    TestDocumentShadow();
     TestCommandLine();
     std::printf("notepadxp tests: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

@@ -46,6 +46,11 @@ LRESULT EditKeyHandler::OnKeyDown(UINT /*message*/, WPARAM wParam, LPARAM lParam
             return 0;
         }
     }
+    if (wParam == VK_DELETE) {
+        // Plain (or Shift+) Delete mutates on the keydown itself; with a
+        // selection either form removes exactly the selection.
+        NotifyPreChange(PendingChange::Kind::DeleteOne);
+    }
     // Everything else (arrows, Home/End, PgUp/PgDn, ...) may move the caret:
     // let the control process it first, then report.
     return OnCaretMessage(WM_KEYDOWN, wParam, lParam, handled);
@@ -96,8 +101,72 @@ LRESULT EditKeyHandler::OnChar(UINT /*message*/, WPARAM wParam, LPARAM /*lParam*
         handled = TRUE;
         return 0;
     }
-    handled = FALSE;
+    // Predict the mutation for the document shadow before the control acts.
+    const auto ch = static_cast<wchar_t>(wParam);
+    if (ch == L'\b') {
+        NotifyPreChange(PendingChange::Kind::BackspaceOne);
+    } else if (ch == L'\r' || ch == L'\n') {
+        NotifyPreChange(PendingChange::Kind::ReplaceSelection, L"\r\n");
+    } else if (ch == L'\t' || ch >= 0x20) {
+        NotifyPreChange(PendingChange::Kind::ReplaceSelection, std::wstring(1, ch));
+    }
+    handled = FALSE;  // Let the Edit control process the character.
     return 0;
+}
+
+LRESULT EditKeyHandler::OnReplaceSel(UINT message, WPARAM wParam, LPARAM lParam, BOOL& handled) {
+    const auto* text = reinterpret_cast<const wchar_t*>(lParam);
+    NotifyPreChange(PendingChange::Kind::ReplaceSelection,
+                    text != nullptr ? std::wstring(text) : std::wstring());
+    return OnCaretMessage(message, wParam, lParam, handled);
+}
+
+LRESULT EditKeyHandler::OnMutatingMessage(UINT message, WPARAM wParam, LPARAM lParam,
+                                          BOOL& handled) {
+    switch (message) {
+        case WM_PASTE: {
+            // The control inserts the clipboard's CF_UNICODETEXT verbatim (and,
+            // like us, stops at the first NUL); read it as the prediction.
+            std::wstring clip;
+            bool known = false;
+            if (OpenClipboard() != FALSE) {
+                if (const HANDLE data = GetClipboardData(CF_UNICODETEXT)) {
+                    if (const auto* chars = static_cast<const wchar_t*>(GlobalLock(data))) {
+                        clip = chars;
+                        GlobalUnlock(data);
+                        known = true;
+                    }
+                }
+                CloseClipboard();
+            }
+            if (known) {
+                NotifyPreChange(PendingChange::Kind::ReplaceSelection, std::move(clip));
+            } else {
+                NotifyPreChange(PendingChange::Kind::Unknown);
+            }
+            break;
+        }
+        case WM_CUT:
+        case WM_CLEAR:
+            NotifyPreChange(PendingChange::Kind::ReplaceSelection, std::wstring());
+            break;
+        default:  // WM_UNDO / EM_UNDO: the restored content is unpredictable.
+            NotifyPreChange(PendingChange::Kind::Unknown);
+            break;
+    }
+    return OnCaretMessage(message, wParam, lParam, handled);
+}
+
+void EditKeyHandler::NotifyPreChange(PendingChange::Kind kind, std::wstring inserted) {
+    if (!preChangeNotify_) {
+        return;
+    }
+    PendingChange pending;
+    pending.kind = kind;
+    pending.inserted = std::move(inserted);
+    CEdit edit(m_hWnd);
+    edit.GetSel(pending.selStart, pending.selEnd);
+    preChangeNotify_(std::move(pending));
 }
 
 void EditKeyHandler::DeleteWordLeft() {

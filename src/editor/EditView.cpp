@@ -29,10 +29,24 @@ bool EditView::Create(HWND parent, bool wordWrap) {
     edit_.LimitText(0);  // 0 == remove the default text-length cap.
     keyHandler_.SubclassWindow(edit_.m_hWnd);  // Add the word-delete shortcuts.
     keyHandler_.SetCaretNotify([this] { NotifyCaretMaybeMoved(); });
+    keyHandler_.SetPreChangeNotify([this](PendingChange pending) {
+        OnPreChange(std::move(pending));
+    });
     undo_.Reset();
-    bridgeText_.clear();
-    bridgeSelStart_ = bridgeSelEnd_ = 0;
+    shadow_.Reset();
     return true;
+}
+
+void EditView::OnPreChange(PendingChange pending) {
+    if (suppressRecording_) {
+        return;  // Our own programmatic splices sync the shadow directly.
+    }
+    if (!shadow_.IsMaterialized()) {
+        // First modification attempt: the one-time full read that makes
+        // read-only viewing free.
+        shadow_.Materialize(GetText());
+    }
+    shadow_.SetPending(std::move(pending));
 }
 
 void EditView::NotifyCaretMaybeMoved() {
@@ -144,36 +158,11 @@ void EditView::OnEditChanged() {
     int selStart = 0;
     int selEnd = 0;
     edit_.GetSel(selStart, selEnd);
-    std::wstring text = GetText();
-
-    // Temporary bridge until DocumentShadow lands: locate the single changed
-    // region as common prefix + suffix against the previous full text.
-    size_t prefix = 0;
-    const size_t shared = std::min(bridgeText_.size(), text.size());
-    while (prefix < shared && bridgeText_[prefix] == text[prefix]) {
-        ++prefix;
+    const auto delta = shadow_.CaptureChange(static_cast<size_t>(TextLength()), selStart, selEnd,
+                                             [this] { return GetText(); });
+    if (delta.has_value()) {
+        undo_.RecordChange(*delta);
     }
-    size_t oldEnd = bridgeText_.size();
-    size_t newEnd = text.size();
-    while (oldEnd > prefix && newEnd > prefix && bridgeText_[oldEnd - 1] == text[newEnd - 1]) {
-        --oldEnd;
-        --newEnd;
-    }
-    if (oldEnd != prefix || newEnd != prefix) {
-        EditDelta delta;
-        delta.pos = prefix;
-        delta.removed = bridgeText_.substr(prefix, oldEnd - prefix);
-        delta.inserted = text.substr(prefix, newEnd - prefix);
-        delta.charBeforePos = prefix > 0 ? text[prefix - 1] : L'\0';
-        delta.selStartBefore = bridgeSelStart_;
-        delta.selEndBefore = bridgeSelEnd_;
-        delta.selStartAfter = selStart;
-        delta.selEndAfter = selEnd;
-        undo_.RecordChange(delta);
-    }
-    bridgeText_ = std::move(text);
-    bridgeSelStart_ = selStart;
-    bridgeSelEnd_ = selEnd;
     NotifyCaretMaybeMoved();  // Edits move the caret without an EM_SETSEL.
 }
 
@@ -186,9 +175,7 @@ void EditView::ApplyDelta(size_t pos, size_t removeLen, const std::wstring& inse
     edit_.SendMessage(EM_SCROLLCARET);
     edit_.SetModify(TRUE);  // The document differs from its on-disk form again.
     suppressRecording_ = false;
-    bridgeText_.replace(pos, removeLen, insertText);
-    bridgeSelStart_ = selStart;
-    bridgeSelEnd_ = selEnd;
+    shadow_.ApplyExternal(pos, removeLen, insertText);
 }
 
 void EditView::Cut() {
@@ -239,8 +226,7 @@ void EditView::Reset() {
     edit_.SetSel(0, 0);
     suppressRecording_ = false;
     undo_.Reset();
-    bridgeText_.clear();
-    bridgeSelStart_ = bridgeSelEnd_ = 0;
+    shadow_.Reset();
 }
 
 void EditView::SetText(std::wstring_view text) {
@@ -252,8 +238,7 @@ void EditView::SetText(std::wstring_view text) {
     edit_.SendMessage(EM_SCROLLCARET);
     suppressRecording_ = false;
     undo_.Reset();
-    bridgeText_ = buffer;
-    bridgeSelStart_ = bridgeSelEnd_ = 0;
+    shadow_.Reset();  // Re-materializes lazily on the first edit.
 }
 
 std::wstring EditView::GetText() {
