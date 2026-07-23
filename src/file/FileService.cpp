@@ -44,6 +44,7 @@ bool FileService::New() {
     document_.encoding = TextEncoding::Ansi;
     document_.language = lang::Language::PlainText;
     document_.indentStyle = {};
+    watcher_.Disarm();
     NotifyDocumentChanged();
     return true;
 }
@@ -96,6 +97,26 @@ bool FileService::CanClose() {
     return CheckSave();
 }
 
+void FileService::PromptReloadIfChanged() {
+    if (checkingDiskChange_ || document_.untitled || !watcher_.IsArmed()) {
+        return;
+    }
+    if (watcher_.Check() == FileWatcher::Verdict::Unchanged) {
+        return;
+    }
+    checkingDiskChange_ = true;
+    if (prompts_.AskReloadChanged(util::PathLeaf(document_.filePath), buffer_.IsModified())) {
+        Reload();
+    } else {
+        watcher_.Rearm();  // Same change: do not ask again.
+    }
+    checkingDiskChange_ = false;
+}
+
+bool FileService::Reload() {
+    return LoadFromPath(document_.filePath, std::nullopt);
+}
+
 bool FileService::CheckSave() {
     // No prompt for an untitled, empty buffer, or an unmodified document.
     if (document_.untitled && buffer_.TextLength() == 0) {
@@ -129,6 +150,7 @@ bool FileService::LoadFromPath(const std::wstring& path, std::optional<TextEncod
                 document_.untitled = false;
                 document_.encoding = TextEncoding::Ansi;
                 DetectDocumentLanguage(std::wstring());  // Extension decides.
+                watcher_.Disarm();  // Nothing on disk yet; the first save arms.
                 NotifyDocumentChanged();
                 return true;
             }
@@ -148,6 +170,7 @@ bool FileService::LoadFromPath(const std::wstring& path, std::optional<TextEncod
     document_.untitled = false;
     document_.encoding = loaded.encoding;
     DetectDocumentLanguage(loaded.text);
+    watcher_.Arm(path);
 
     // ".LOG" files get a timestamp appended at end-of-file on open.
     if (StartsWithLogTag(loaded.text)) {
@@ -178,6 +201,7 @@ bool FileService::SaveToPath(const std::wstring& path, TextEncoding encoding) {
     }
 
     buffer_.SetModified(false);
+    watcher_.Arm(path);
     return true;
 }
 

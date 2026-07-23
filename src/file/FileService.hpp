@@ -9,6 +9,7 @@
 #include "file/DocumentState.hpp"
 #include "file/Encoding.hpp"
 #include "file/FilePrompts.hpp"
+#include "file/FileWatcher.hpp"
 #include "file/TextBuffer.hpp"
 #include "util/WinLean.hpp"
 
@@ -62,6 +63,15 @@ public:
     ///        document and returns false only if the user chose Cancel.
     [[nodiscard]] bool CanClose();
 
+    /// @brief If the open file changed on disk since it was loaded/saved,
+    ///        offer to reload it (call on app activation). Declining re-arms
+    ///        the stamp so the same change is not asked about again.
+    void PromptReloadIfChanged();
+
+    /// @brief Reload the current file from disk (auto-detecting the encoding),
+    ///        discarding the buffer. No save gate — callers decide first.
+    bool Reload();
+
     [[nodiscard]] const DocumentState& Document() const noexcept {
         return document_;
     }
@@ -76,8 +86,10 @@ private:
     TextBuffer& buffer_;
     DocumentState& document_;
     FilePrompts& prompts_;
+    FileWatcher watcher_;
     std::function<void()> documentChanged_;
     HWND owner_ = nullptr;
+    bool checkingDiskChange_ = false;  // Reentrancy guard for the reload prompt.
 };
 
 } // namespace notepadxp::file

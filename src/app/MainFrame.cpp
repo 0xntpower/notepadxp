@@ -118,6 +118,12 @@ void MainFrame::OnSize(UINT type, CSize /*size*/) {
     LayoutChildren();
 }
 
+void MainFrame::OnActivate(UINT state, BOOL minimized, CWindow /*other*/) {
+    if (state != WA_INACTIVE && minimized == FALSE) {
+        fileService_.PromptReloadIfChanged();
+    }
+}
+
 void MainFrame::OnSetFocus(CWindow /*oldFocus*/) {
     editView_.SetFocusToEdit();
 }

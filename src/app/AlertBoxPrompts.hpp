@@ -22,6 +22,8 @@ public:
     [[nodiscard]] SaveChoice AskSaveChanges(const std::wstring& documentName) override;
     [[nodiscard]] bool AskCreateNewFile(const std::wstring& fileName) override;
     [[nodiscard]] bool AskContinueLossySave(const std::wstring& fileName) override;
+    [[nodiscard]] bool AskReloadChanged(const std::wstring& fileName,
+                                        bool bufferModified) override;
     void ReportError(Error error, const std::wstring& fileName) override;
 
 private:

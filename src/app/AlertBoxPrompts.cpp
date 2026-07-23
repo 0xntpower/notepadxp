@@ -30,6 +30,13 @@ bool AlertBoxPrompts::AskContinueLossySave(const std::wstring& fileName) {
                           MB_OKCANCEL | MB_ICONEXCLAMATION) != IDCANCEL;
 }
 
+bool AlertBoxPrompts::AskReloadChanged(const std::wstring& fileName, bool bufferModified) {
+    const std::wstring message =
+        util::LoadAndMerge(bufferModified ? IDS_RELOADMOD : IDS_RELOAD, fileName);
+    return util::AlertBox(owner_, util::LoadStr(IDS_NN), message,
+                          MB_YESNO | MB_ICONEXCLAMATION) == IDYES;
+}
+
 void AlertBoxPrompts::ReportError(Error error, const std::wstring& fileName) {
     UINT stringId = IDS_DISKERROR;
     switch (error) {

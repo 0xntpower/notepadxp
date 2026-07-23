@@ -33,6 +33,11 @@ public:
     /// @brief The chosen encoding cannot represent every character; save anyway?
     [[nodiscard]] virtual bool AskContinueLossySave(const std::wstring& fileName) = 0;
 
+    /// @brief The open file changed on disk; reload it? @p bufferModified
+    ///        selects the variant that warns local edits will be discarded.
+    [[nodiscard]] virtual bool AskReloadChanged(const std::wstring& fileName,
+                                                bool bufferModified) = 0;
+
     /// @brief Report a failed operation on @p fileName.
     virtual void ReportError(Error error, const std::wstring& fileName) = 0;
 };

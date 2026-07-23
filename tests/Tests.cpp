@@ -19,6 +19,7 @@
 #include "editor/UndoManager.cpp"
 #include "file/Encoding.cpp"
 #include "file/FileService.cpp"
+#include "file/FileWatcher.cpp"
 #include "file/TextFile.cpp"
 #include "lang/BraceMatch.cpp"
 #include "lang/CommentToggle.cpp"
@@ -295,6 +296,11 @@ public:
         ++lossyAsked;
         return lossyAnswer;
     }
+    bool AskReloadChanged(const std::wstring& /*fileName*/, bool bufferModified) override {
+        ++reloadAsked;
+        lastReloadModified = bufferModified;
+        return reloadAnswer;
+    }
     void ReportError(Error /*error*/, const std::wstring& /*fileName*/) override {
         ++errorsReported;
     }
@@ -302,9 +308,12 @@ public:
     SaveChoice saveChoice = SaveChoice::Discard;
     bool createAnswer = false;
     bool lossyAnswer = true;
+    bool reloadAnswer = false;
+    bool lastReloadModified = false;
     int saveChangesAsked = 0;
     int createAsked = 0;
     int lossyAsked = 0;
+    int reloadAsked = 0;
     int errorsReported = 0;
 };
 
@@ -435,6 +444,69 @@ void TestFileService() {
 
         CHECK(svc.New());
         CHECK(doc.language == notepadxp::lang::Language::PlainText);
+    }
+
+    // Disk-change detection: FileWatcher verdicts and the reload prompt flow.
+    {
+        const std::wstring path = TempFilePath(L"notepadxp_watch.txt");
+        bool lossy = true;
+        CHECK(WriteAllBytes(path, EncodeText(L"one", TextEncoding::Utf8, lossy)) ==
+              SaveStatus::Ok);
+
+        notepadxp::file::FileWatcher watcher;
+        using Verdict = notepadxp::file::FileWatcher::Verdict;
+        watcher.Arm(path);
+        CHECK(watcher.IsArmed());
+        CHECK(watcher.Check() == Verdict::Unchanged);
+
+        // Append -> Grown (never older, strictly larger).
+        CHECK(WriteAllBytes(path, EncodeText(L"one two", TextEncoding::Utf8, lossy)) ==
+              SaveStatus::Ok);
+        CHECK(watcher.Check() == Verdict::Grown);
+
+        // Rewrite shorter -> Replaced; Rearm adopts it.
+        CHECK(WriteAllBytes(path, EncodeText(L"x", TextEncoding::Utf8, lossy)) == SaveStatus::Ok);
+        CHECK(watcher.Check() == Verdict::Replaced);
+        watcher.Rearm();
+        CHECK(watcher.Check() == Verdict::Unchanged);
+        watcher.Disarm();
+        CHECK(!watcher.IsArmed());
+
+        // The prompt flow through FileService.
+        FakeTextBuffer buffer;
+        FakePrompts prompts;
+        DocumentState doc;
+        FileService svc(buffer, doc, prompts);
+        CHECK(WriteAllBytes(path, EncodeText(L"original", TextEncoding::Utf8, lossy)) ==
+              SaveStatus::Ok);
+        CHECK(svc.OpenPath(path));
+        CHECK(buffer.text == L"original");
+
+        // No disk change: no prompt.
+        svc.PromptReloadIfChanged();
+        CHECK(prompts.reloadAsked == 0);
+
+        // Change on disk + accept: buffer reloads.
+        CHECK(WriteAllBytes(path, EncodeText(L"changed on disk", TextEncoding::Utf8, lossy)) ==
+              SaveStatus::Ok);
+        prompts.reloadAnswer = true;
+        svc.PromptReloadIfChanged();
+        CHECK(prompts.reloadAsked == 1);
+        CHECK(buffer.text == L"changed on disk");
+
+        // Change again + decline: buffer kept, and the same change is not re-asked.
+        CHECK(WriteAllBytes(path, EncodeText(L"changed again", TextEncoding::Utf8, lossy)) ==
+              SaveStatus::Ok);
+        buffer.modified = true;  // The modified variant of the prompt is used.
+        prompts.reloadAnswer = false;
+        svc.PromptReloadIfChanged();
+        CHECK(prompts.reloadAsked == 2);
+        CHECK(prompts.lastReloadModified);
+        CHECK(buffer.text == L"changed on disk");
+        svc.PromptReloadIfChanged();
+        CHECK(prompts.reloadAsked == 2);  // Re-armed: no repeat prompt.
+
+        DeleteFileW(path.c_str());
     }
 
     // The lossy-save gate: decline leaves the file unwritten and the buffer dirty.

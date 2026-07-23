@@ -35,6 +35,7 @@ public:
         MESSAGE_HANDLER(findReplace_.RegisteredMessage(), OnFindReplaceMessage)
         MSG_WM_CREATE(OnCreate)
         MSG_WM_SIZE(OnSize)
+        MSG_WM_ACTIVATE(OnActivate)
         MSG_WM_SETFOCUS(OnSetFocus)
         MSG_WM_INITMENUPOPUP(OnInitMenuPopup)
         MSG_WM_COMMAND(OnCommand)
@@ -55,6 +56,7 @@ public:
 private:
     int OnCreate(LPCREATESTRUCT createStruct);
     void OnSize(UINT type, CSize size);
+    void OnActivate(UINT state, BOOL minimized, CWindow other);
     void OnSetFocus(CWindow oldFocus);
     void OnInitMenuPopup(CMenuHandle menu, UINT index, BOOL isSystemMenu);
     void OnCommand(UINT notifyCode, int id, CWindow control);

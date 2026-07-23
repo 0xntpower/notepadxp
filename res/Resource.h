@@ -127,6 +127,8 @@
 #define IDS_FILE                44
 #define IDS_LETTERS             45
 #define IDS_JSONERR             46
+#define IDS_RELOAD              47
+#define IDS_RELOADMOD           48
 #define IDS_TEXT_FRIENDLY_NAME  469
 
 // --- Context-help IDs ------------------------------------------------------
