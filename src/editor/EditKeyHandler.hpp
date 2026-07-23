@@ -6,6 +6,12 @@
 //   * Ctrl+Delete    — delete the word (and trailing whitespace) to the right
 // The bare control inserts a 0x7F "box" for Ctrl+Backspace and ignores
 // Ctrl+Delete, so both are handled here and the stray 0x7F WM_CHAR is swallowed.
+//
+// The subclass is also the seam through which caret movement is observed: every
+// message that can move the caret (keys, mouse, EM_SETSEL) is let through to
+// the control first and then reported via the caret-notify callback.
+
+#include <functional>
 
 #include "WtlIncludes.hpp"
 
@@ -19,17 +25,32 @@ public:
     // Required by CWindowImpl; unused because we only SubclassWindow(), never Create().
     DECLARE_WND_CLASS(nullptr)
 
+    /// @brief Register the listener fired after any message that can move the
+    ///        caret. Survives re-subclassing (the word-wrap recreate).
+    void SetCaretNotify(std::function<void()> notify) {
+        caretNotify_ = std::move(notify);
+    }
+
     BEGIN_MSG_MAP(EditKeyHandler)
         MESSAGE_HANDLER(WM_KEYDOWN, OnKeyDown)
         MESSAGE_HANDLER(WM_CHAR, OnChar)
+        MESSAGE_HANDLER(WM_LBUTTONDOWN, OnCaretMessage)
+        MESSAGE_HANDLER(WM_LBUTTONUP, OnCaretMessage)
+        MESSAGE_HANDLER(WM_MOUSEMOVE, OnMouseMove)
+        MESSAGE_HANDLER(EM_SETSEL, OnCaretMessage)
     END_MSG_MAP()
 
 private:
     LRESULT OnKeyDown(UINT message, WPARAM wParam, LPARAM lParam, BOOL& handled);
     LRESULT OnChar(UINT message, WPARAM wParam, LPARAM lParam, BOOL& handled);
+    LRESULT OnCaretMessage(UINT message, WPARAM wParam, LPARAM lParam, BOOL& handled);
+    LRESULT OnMouseMove(UINT message, WPARAM wParam, LPARAM lParam, BOOL& handled);
 
     void DeleteWordLeft();
     void DeleteWordRight();
+    void NotifyCaret();
+
+    std::function<void()> caretNotify_;
 };
 
 } // namespace notepadxp::editor

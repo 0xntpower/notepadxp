@@ -75,16 +75,6 @@ private:
     void UpdateMenuState();
     void SaveWindowPlacement();
     void OnCaretMoved();
-    void InstallCaretHook();
-
-    // WinEvent hook trampoline for caret-position changes (drives Ln/Col).
-    static void CALLBACK WinEventProc(HWINEVENTHOOK hook, DWORD event, HWND hwnd, LONG idObject,
-                                      LONG idChild, DWORD threadId, DWORD eventTime);
-
-    // The single live frame, so the static WinEvent callback can reach it.
-    // SetWinEventHook provides no user context pointer; this app has exactly one
-    // frame, so a single static pointer is the standard, safe mechanism.
-    static MainFrame* s_activeFrame;
 
     settings::Settings settings_;
     file::DocumentState document_;
@@ -95,8 +85,6 @@ private:
     dialogs::FindReplaceController findReplace_;
     printing::PrintService printService_;
     printing::PageSetup pageSetup_;
-
-    HWINEVENTHOOK caretHook_ = nullptr;
 };
 
 } // namespace notepadxp::app

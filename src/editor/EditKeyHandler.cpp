@@ -33,8 +33,7 @@ std::wstring ControlText(CEdit& edit) {
 
 } // namespace
 
-LRESULT EditKeyHandler::OnKeyDown(UINT /*message*/, WPARAM wParam, LPARAM /*lParam*/,
-                                  BOOL& handled) {
+LRESULT EditKeyHandler::OnKeyDown(UINT /*message*/, WPARAM wParam, LPARAM lParam, BOOL& handled) {
     if (IsCtrlDown() && !IsAltDown()) {  // exclude AltGr (Ctrl+Alt)
         if (wParam == VK_BACK) {
             DeleteWordLeft();
@@ -47,8 +46,32 @@ LRESULT EditKeyHandler::OnKeyDown(UINT /*message*/, WPARAM wParam, LPARAM /*lPar
             return 0;
         }
     }
-    handled = FALSE;  // Everything else: let the Edit control handle it.
-    return 0;
+    // Everything else (arrows, Home/End, PgUp/PgDn, ...) may move the caret:
+    // let the control process it first, then report.
+    return OnCaretMessage(WM_KEYDOWN, wParam, lParam, handled);
+}
+
+LRESULT EditKeyHandler::OnCaretMessage(UINT message, WPARAM wParam, LPARAM lParam,
+                                       BOOL& /*handled*/) {
+    // DefWindowProc on a subclassed window calls the control's original window
+    // procedure; notify only after the control has updated the caret.
+    const LRESULT result = DefWindowProc(message, wParam, lParam);
+    NotifyCaret();
+    return result;
+}
+
+LRESULT EditKeyHandler::OnMouseMove(UINT message, WPARAM wParam, LPARAM lParam, BOOL& handled) {
+    if (GetCapture() != m_hWnd) {  // The caret only moves while drag-selecting.
+        handled = FALSE;
+        return 0;
+    }
+    return OnCaretMessage(message, wParam, lParam, handled);
+}
+
+void EditKeyHandler::NotifyCaret() {
+    if (caretNotify_) {
+        caretNotify_();
+    }
 }
 
 LRESULT EditKeyHandler::OnChar(UINT /*message*/, WPARAM wParam, LPARAM /*lParam*/, BOOL& handled) {

@@ -25,8 +25,6 @@ bool ClipboardHasText() {
 
 } // namespace
 
-MainFrame* MainFrame::s_activeFrame = nullptr;
-
 MainFrame::MainFrame()
     : fileService_(editView_, document_),
       findReplace_(editView_),
@@ -85,6 +83,7 @@ int MainFrame::OnCreate(LPCREATESTRUCT /*createStruct*/) {
     if (!editView_.Create(m_hWnd, settings_.wordWrap)) {
         return -1;
     }
+    editView_.SetCaretMovedCallback([this] { OnCaretMoved(); });
     ApplyFontFromSettings();
     fileService_.AttachOwner(m_hWnd);
     DragAcceptFiles(TRUE);  // CWindow member: enables WM_DROPFILES for this window.
@@ -95,7 +94,6 @@ int MainFrame::OnCreate(LPCREATESTRUCT /*createStruct*/) {
     }
 
     LayoutChildren();
-    InstallCaretHook();
     editView_.SetFocusToEdit();
     return 0;
 }
@@ -251,11 +249,6 @@ void MainFrame::OnDropFiles(HDROP dropInfo) {
 }
 
 void MainFrame::OnDestroy() {
-    if (caretHook_ != nullptr) {
-        UnhookWinEvent(caretHook_);
-        caretHook_ = nullptr;
-    }
-    s_activeFrame = nullptr;
     PostQuitMessage(0);
 }
 
@@ -392,23 +385,6 @@ void MainFrame::OnCaretMoved() {
     int col = 1;
     editView_.GetCaretLineCol(line, col);
     statusBar_.SetLineCol(line, col);
-}
-
-void MainFrame::InstallCaretHook() {
-    s_activeFrame = this;
-    // Scope the hook to this process+thread; OUT_OF_CONTEXT delivers on our thread.
-    caretHook_ = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, nullptr,
-                                 &MainFrame::WinEventProc, GetCurrentProcessId(),
-                                 GetCurrentThreadId(), WINEVENT_OUTOFCONTEXT);
-}
-
-void CALLBACK MainFrame::WinEventProc(HWINEVENTHOOK /*hook*/, DWORD event, HWND /*hwnd*/,
-                                      LONG idObject, LONG /*idChild*/, DWORD /*threadId*/,
-                                      DWORD /*eventTime*/) {
-    if (event == EVENT_OBJECT_LOCATIONCHANGE && idObject == OBJID_CARET &&
-        s_activeFrame != nullptr) {
-        s_activeFrame->OnCaretMoved();
-    }
 }
 
 } // namespace notepadxp::app

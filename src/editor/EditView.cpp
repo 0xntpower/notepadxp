@@ -28,8 +28,24 @@ bool EditView::Create(HWND parent, bool wordWrap) {
     }
     edit_.LimitText(0);  // 0 == remove the default text-length cap.
     keyHandler_.SubclassWindow(edit_.m_hWnd);  // Add the word-delete shortcuts.
+    keyHandler_.SetCaretNotify([this] { NotifyCaretMaybeMoved(); });
     undo_.Reset(std::wstring(), 0, 0);
     return true;
+}
+
+void EditView::NotifyCaretMaybeMoved() {
+    if (!caretMoved_ || edit_.m_hWnd == nullptr) {
+        return;
+    }
+    int line = 1;
+    int col = 1;
+    GetCaretLineCol(line, col);
+    if (line == lastCaretLine_ && col == lastCaretCol_) {
+        return;
+    }
+    lastCaretLine_ = line;
+    lastCaretCol_ = col;
+    caretMoved_();
 }
 
 void EditView::Layout(const RECT& rect) {
@@ -130,6 +146,7 @@ void EditView::OnEditChanged() {
     int selEnd = 0;
     edit_.GetSel(selStart, selEnd);
     undo_.RecordChange(GetText(), selStart, selEnd);
+    NotifyCaretMaybeMoved();  // Edits move the caret without an EM_SETSEL.
 }
 
 void EditView::ApplySnapshot(const EditSnapshot& snapshot) {

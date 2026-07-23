@@ -2,6 +2,7 @@
 
 // EditView.hpp — Wraps the multiline edit control that is Notepad's text area.
 
+#include <functional>
 #include <string>
 #include <string_view>
 
@@ -98,15 +99,26 @@ public:
     /// @brief Compute the 1-based caret line and column from the selection start.
     void GetCaretLineCol(int& lineOut, int& colOut);
 
+    /// @brief Register the owner's listener for caret line/column changes.
+    ///        Fired only when the (line, col) actually changed.
+    void SetCaretMovedCallback(std::function<void()> callback) {
+        caretMoved_ = std::move(callback);
+    }
+
 private:
+    void NotifyCaretMaybeMoved();
+
     [[nodiscard]] static DWORD StyleFor(bool wordWrap) noexcept;
     void ReapplyFont();
     void ApplySnapshot(const EditSnapshot& snapshot);
 
     CEdit edit_;
-    EditKeyHandler keyHandler_;  // Subclasses edit_ for the word-delete shortcuts.
+    EditKeyHandler keyHandler_;  // Subclasses edit_: word-delete + caret notify.
     UndoManager undo_;
     util::GdiGuard fontGuard_;  // Owns the current HFONT.
+    std::function<void()> caretMoved_;
+    int lastCaretLine_ = 0;  // Dedupe cache for caret notifications (0 == none yet).
+    int lastCaretCol_ = 0;
     bool wordWrap_ = false;
     bool suppressRecording_ = false;  // True while we change text programmatically.
     HWND parent_ = nullptr;
