@@ -2,30 +2,41 @@
 
 // FileService.hpp — File menu operations: New, Open, Save, Save As.
 
+#include <functional>
 #include <optional>
 #include <string>
 
-#include "editor/EditView.hpp"
 #include "file/DocumentState.hpp"
 #include "file/Encoding.hpp"
+#include "file/FilePrompts.hpp"
+#include "file/TextBuffer.hpp"
+#include "util/WinLean.hpp"
 
 namespace notepadxp::file {
 
-/// @brief Orchestrates document lifecycle operations against the edit view and
-///        the shared DocumentState (both owned by the frame, held by reference).
+/// @brief Orchestrates the document lifecycle against the text buffer and the
+///        shared DocumentState (owned by the frame, held by reference). All
+///        user interaction goes through the FilePrompts seam; the frame
+///        observes identity/content changes via the document-changed callback.
 /// @threadsafety Not thread-safe; UI thread only.
 class FileService final {
 public:
-    FileService(editor::EditView& editView, DocumentState& document) noexcept
-        : editView_(editView), document_(document) {}
+    FileService(TextBuffer& buffer, DocumentState& document, FilePrompts& prompts) noexcept
+        : buffer_(buffer), document_(document), prompts_(prompts) {}
 
     FileService(const FileService&) = delete;
     FileService& operator=(const FileService&) = delete;
 
-    /// @brief Set the window that owns dialogs/prompts. Call once after the
-    ///        frame window exists.
+    /// @brief Set the window that owns the Open/Save dialogs. Call once after
+    ///        the frame window exists.
     void AttachOwner(HWND owner) noexcept {
         owner_ = owner;
+    }
+
+    /// @brief Register the frame's listener for "a different document (or a new
+    ///        identity) is now loaded" — fired after New, Open and Save As.
+    void SetDocumentChangedCallback(std::function<void()> callback) {
+        documentChanged_ = std::move(callback);
     }
 
     /// @brief Start a new, empty, untitled document (prompts to save first if the
@@ -59,9 +70,12 @@ private:
     [[nodiscard]] bool CheckSave();  // Prompt-to-save gate; false == user cancelled.
     [[nodiscard]] bool LoadFromPath(const std::wstring& path, std::optional<TextEncoding> forced);
     [[nodiscard]] bool SaveToPath(const std::wstring& path, TextEncoding encoding);
+    void NotifyDocumentChanged();
 
-    editor::EditView& editView_;
+    TextBuffer& buffer_;
     DocumentState& document_;
+    FilePrompts& prompts_;
+    std::function<void()> documentChanged_;
     HWND owner_ = nullptr;
 };
 

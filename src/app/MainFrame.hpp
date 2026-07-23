@@ -5,6 +5,7 @@
 #include <string>
 
 #include "WtlIncludes.hpp"
+#include "app/AlertBoxPrompts.hpp"
 #include "dialogs/FindReplaceController.hpp"
 #include "editor/EditView.hpp"
 #include "editor/StatusBar.hpp"
@@ -81,6 +82,7 @@ private:
     editor::EditView editView_;
     editor::StatusBar statusBar_;
 
+    AlertBoxPrompts prompts_;
     file::FileService fileService_;
     dialogs::FindReplaceController findReplace_;
     printing::PrintService printService_;

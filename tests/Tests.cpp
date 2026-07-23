@@ -15,11 +15,29 @@
 #include <vector>
 
 #include "file/Encoding.cpp"
+#include "file/FileService.cpp"
 #include "file/TextFile.cpp"
 #include "printing/HeaderFooter.cpp"
+#include "util/DateTime.cpp"
 #include "util/FileMapping.cpp"
 #include "util/PathName.hpp"
 #include "util/StringTable.cpp"  // Provides util::LoadStr referenced by HeaderFooter.
+
+// Dialog stubs: FileService references the Open/Save dialogs, but the tests
+// exercise it only through the headless paths, so these are never reached.
+namespace notepadxp::dialogs {
+
+std::optional<OpenDialogResult> EncodingFileDialog::ShowOpen(HWND /*parent*/) {
+    return std::nullopt;
+}
+
+std::optional<SaveDialogResult> EncodingFileDialog::ShowSave(HWND /*parent*/,
+                                                             const std::wstring& /*defaultPath*/,
+                                                             file::TextEncoding /*currentEncoding*/) {
+    return std::nullopt;
+}
+
+} // namespace notepadxp::dialogs
 
 namespace {
 
@@ -220,6 +238,194 @@ void TestTextFile() {
     CHECK(SniffEncoding(path) == std::nullopt);
 }
 
+// In-memory adapter at the TextBuffer seam.
+class FakeTextBuffer final : public notepadxp::file::TextBuffer {
+public:
+    void Reset() override {
+        text.clear();
+        modified = false;
+    }
+    void SetText(std::wstring_view t) override {
+        text = t;
+        modified = false;
+    }
+    std::wstring GetText() override {
+        return text;
+    }
+    int TextLength() override {
+        return static_cast<int>(text.size());
+    }
+    bool IsModified() override {
+        return modified;
+    }
+    void SetModified(bool m) override {
+        modified = m;
+    }
+    void MoveCaretToEnd() override {}
+    void InsertText(std::wstring_view t) override {
+        text += t;
+        modified = true;
+    }
+
+    std::wstring text;
+    bool modified = false;
+};
+
+// Scripted adapter at the FilePrompts seam.
+class FakePrompts final : public notepadxp::file::FilePrompts {
+public:
+    SaveChoice AskSaveChanges(const std::wstring& /*documentName*/) override {
+        ++saveChangesAsked;
+        return saveChoice;
+    }
+    bool AskCreateNewFile(const std::wstring& /*fileName*/) override {
+        ++createAsked;
+        return createAnswer;
+    }
+    bool AskContinueLossySave(const std::wstring& /*fileName*/) override {
+        ++lossyAsked;
+        return lossyAnswer;
+    }
+    void ReportError(Error /*error*/, const std::wstring& /*fileName*/) override {
+        ++errorsReported;
+    }
+
+    SaveChoice saveChoice = SaveChoice::Discard;
+    bool createAnswer = false;
+    bool lossyAnswer = true;
+    int saveChangesAsked = 0;
+    int createAsked = 0;
+    int lossyAsked = 0;
+    int errorsReported = 0;
+};
+
+void TestFileService() {
+    using notepadxp::file::DocumentState;
+    using notepadxp::file::EncodeText;
+    using notepadxp::file::FilePrompts;
+    using notepadxp::file::FileService;
+    using notepadxp::file::LoadStatus;
+    using notepadxp::file::LoadTextFile;
+    using notepadxp::file::SaveStatus;
+    using notepadxp::file::TextEncoding;
+    using notepadxp::file::WriteAllBytes;
+    using SaveChoice = FilePrompts::SaveChoice;
+
+    // The prompt-to-save decision table, via CanClose().
+    {
+        FakeTextBuffer buffer;
+        FakePrompts prompts;
+        DocumentState doc;
+        FileService svc(buffer, doc, prompts);
+
+        // Untitled + empty: closes without a prompt.
+        CHECK(svc.CanClose());
+        CHECK(prompts.saveChangesAsked == 0);
+
+        // Untitled with text but unmodified: still no prompt.
+        buffer.text = L"x";
+        buffer.modified = false;
+        CHECK(svc.CanClose());
+        CHECK(prompts.saveChangesAsked == 0);
+
+        // Modified + Discard: closes, asked exactly once.
+        buffer.modified = true;
+        prompts.saveChoice = SaveChoice::Discard;
+        CHECK(svc.CanClose());
+        CHECK(prompts.saveChangesAsked == 1);
+
+        // Modified + Cancel: refuses to close.
+        prompts.saveChoice = SaveChoice::Cancel;
+        CHECK(!svc.CanClose());
+
+        // Untitled + Save falls through to Save As, whose dialog stub cancels,
+        // so the close is aborted.
+        prompts.saveChoice = SaveChoice::Save;
+        CHECK(!svc.CanClose());
+
+        // Titled + Save: writes to disk and closes.
+        const std::wstring path = TempFilePath(L"notepadxp_filesvc_close.txt");
+        doc.filePath = path;
+        doc.untitled = false;
+        doc.encoding = TextEncoding::Ansi;
+        buffer.text = L"saved on close";
+        buffer.modified = true;
+        CHECK(svc.CanClose());
+        CHECK(!buffer.modified);
+        const auto loaded = LoadTextFile(path, std::nullopt);
+        CHECK(loaded.status == LoadStatus::Ok);
+        CHECK(loaded.text == L"saved on close");
+        DeleteFileW(path.c_str());
+    }
+
+    // OpenPath, New, and the file-not-found create flow raise the
+    // document-changed signal exactly when the identity/content changes.
+    {
+        FakeTextBuffer buffer;
+        FakePrompts prompts;
+        DocumentState doc;
+        FileService svc(buffer, doc, prompts);
+        int changed = 0;
+        svc.SetDocumentChangedCallback([&changed] { ++changed; });
+
+        const std::wstring path = TempFilePath(L"notepadxp_filesvc_open.txt");
+        bool lossy = true;
+        CHECK(WriteAllBytes(path, EncodeText(L"content", TextEncoding::Utf8, lossy)) ==
+              SaveStatus::Ok);
+        CHECK(svc.OpenPath(path));
+        CHECK(changed == 1);
+        CHECK(buffer.text == L"content");
+        CHECK(!doc.untitled);
+        CHECK(doc.encoding == TextEncoding::Utf8);
+
+        CHECK(svc.New());
+        CHECK(changed == 2);
+        CHECK(doc.untitled);
+        CHECK(buffer.text.empty());
+
+        // Missing file, user declines the create prompt: no change, no signal.
+        DeleteFileW(path.c_str());
+        prompts.createAnswer = false;
+        CHECK(!svc.OpenPath(path));
+        CHECK(prompts.createAsked == 1);
+        CHECK(changed == 2);
+
+        // Missing file, user accepts: empty document adopts that identity.
+        prompts.createAnswer = true;
+        CHECK(svc.OpenPath(path));
+        CHECK(prompts.createAsked == 2);
+        CHECK(changed == 3);
+        CHECK(!doc.untitled);
+        CHECK(doc.filePath == path);
+    }
+
+    // The lossy-save gate: decline leaves the file unwritten and the buffer dirty.
+    {
+        FakeTextBuffer buffer;
+        FakePrompts prompts;
+        DocumentState doc;
+        FileService svc(buffer, doc, prompts);
+
+        const std::wstring path = TempFilePath(L"notepadxp_filesvc_lossy.txt");
+        doc.filePath = path;
+        doc.untitled = false;
+        doc.encoding = TextEncoding::Ansi;
+        buffer.text = L"\x2603";  // Snowman: not representable in any ANSI code page.
+        buffer.modified = true;
+
+        prompts.lossyAnswer = false;
+        CHECK(!svc.Save());
+        CHECK(prompts.lossyAsked == 1);
+        CHECK(buffer.modified);
+        CHECK(LoadTextFile(path, std::nullopt).status == LoadStatus::NotFound);
+
+        prompts.lossyAnswer = true;
+        CHECK(svc.Save());
+        CHECK(!buffer.modified);
+        DeleteFileW(path.c_str());
+    }
+}
+
 } // namespace
 
 int main() {
@@ -227,6 +433,7 @@ int main() {
     TestHeaderFooter();
     TestPathName();
     TestTextFile();
+    TestFileService();
     std::printf("notepadxp tests: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

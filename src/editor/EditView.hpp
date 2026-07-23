@@ -9,18 +9,20 @@
 #include "WtlIncludes.hpp"
 #include "editor/EditKeyHandler.hpp"
 #include "editor/UndoManager.hpp"
+#include "file/TextBuffer.hpp"
 #include "util/GdiGuard.hpp"
 
 namespace notepadxp::editor {
 
 /// @brief Owns and drives the child Edit control: creation, font, word-wrap
 ///        recreation, the clipboard/undo commands, and caret position queries.
+///        Adapts file::TextBuffer, so the file lifecycle can run against it.
 /// @threadsafety Not thread-safe; lives on and is used from the UI thread only.
 ///
 /// Word wrap cannot be toggled on a live Edit control, so SetWordWrap()
 /// destroys and recreates the control (preserving text, font, modify flag and
 /// caret) exactly as classic Notepad does.
-class EditView final {
+class EditView final : public file::TextBuffer {
 public:
     EditView() = default;
 
@@ -59,7 +61,7 @@ public:
     void SelectAll();
 
     /// @brief Replace the current selection with @p text as a single undo unit.
-    void InsertText(std::wstring_view text);
+    void InsertText(std::wstring_view text) override;
 
     /// @brief Record the latest edit into the undo history (call on EN_CHANGE).
     void OnEditChanged();
@@ -69,16 +71,16 @@ public:
     void GoToLine(int lineNumber);
 
     /// @brief Clear all text and the modify flag (the File > New action).
-    void Reset();
+    void Reset() override;
 
     /// @brief Replace all text with @p text, clear the modify flag, home the caret.
-    void SetText(std::wstring_view text);
+    void SetText(std::wstring_view text) override;
 
     /// @brief Return the full document text.
-    [[nodiscard]] std::wstring GetText();
+    [[nodiscard]] std::wstring GetText() override;
 
     /// @brief Move the caret to end of buffer and scroll into view (.LOG stamp).
-    void MoveCaretToEnd();
+    void MoveCaretToEnd() override;
 
     /// @brief Read the current selection as character indices [start, end).
     void GetSelection(int& startOut, int& endOut);
@@ -92,9 +94,9 @@ public:
     [[nodiscard]] bool CanUndo();
     [[nodiscard]] bool CanRedo();
     [[nodiscard]] bool HasSelection();
-    [[nodiscard]] int TextLength();
-    [[nodiscard]] bool IsModified();
-    void SetModified(bool modified);
+    [[nodiscard]] int TextLength() override;
+    [[nodiscard]] bool IsModified() override;
+    void SetModified(bool modified) override;
 
     /// @brief Compute the 1-based caret line and column from the selection start.
     void GetCaretLineCol(int& lineOut, int& colOut);

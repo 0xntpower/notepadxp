@@ -27,10 +27,11 @@ bool FileService::New() {
     if (!CheckSave()) {
         return false;
     }
-    editView_.Reset();
+    buffer_.Reset();
     document_.filePath.clear();
     document_.untitled = true;
     document_.encoding = TextEncoding::Ansi;
+    NotifyDocumentChanged();
     return true;
 }
 
@@ -66,6 +67,7 @@ bool FileService::SaveAs() {
     document_.filePath = result->path;
     document_.untitled = false;
     document_.encoding = result->encoding;
+    NotifyDocumentChanged();
     return true;
 }
 
@@ -82,99 +84,91 @@ bool FileService::CanClose() {
 
 bool FileService::CheckSave() {
     // No prompt for an untitled, empty buffer, or an unmodified document.
-    if (document_.untitled && editView_.TextLength() == 0) {
+    if (document_.untitled && buffer_.TextLength() == 0) {
         return true;
     }
-    if (!editView_.IsModified()) {
+    if (!buffer_.IsModified()) {
         return true;
     }
 
     const std::wstring name =
         document_.untitled ? util::LoadStr(IDS_UNTITLED) : util::PathLeaf(document_.filePath);
-    const std::wstring text = util::LoadAndMerge(IDS_SCBC, name);
-    const int answer =
-        util::AlertBox(owner_, util::LoadStr(IDS_NN), text, MB_YESNOCANCEL | MB_ICONEXCLAMATION);
-    if (answer == IDYES) {
-        return Save();  // false if the user then cancels Save As.
+    switch (prompts_.AskSaveChanges(name)) {
+        case FilePrompts::SaveChoice::Save:
+            return Save();  // false if the user then cancels Save As.
+        case FilePrompts::SaveChoice::Cancel:
+            return false;
+        case FilePrompts::SaveChoice::Discard:
+            break;
     }
-    if (answer == IDCANCEL) {
-        return false;
-    }
-    return true;  // IDNO: discard changes.
+    return true;
 }
 
 bool FileService::LoadFromPath(const std::wstring& path, std::optional<TextEncoding> forced) {
     const TextFileLoadResult loaded = LoadTextFile(path, forced);
     switch (loaded.status) {
-        case LoadStatus::NotFound: {
+        case LoadStatus::NotFound:
             // Offer to create a new file with this name (the file-not-found prompt).
-            const std::wstring message = util::LoadAndMerge(IDS_FNF, util::PathLeaf(path));
-            if (util::AlertBox(owner_, util::LoadStr(IDS_NN), message,
-                               MB_YESNO | MB_ICONEXCLAMATION) == IDYES) {
-                editView_.Reset();
+            if (prompts_.AskCreateNewFile(util::PathLeaf(path))) {
+                buffer_.Reset();
                 document_.filePath = path;
                 document_.untitled = false;
                 document_.encoding = TextEncoding::Ansi;
+                NotifyDocumentChanged();
                 return true;
             }
             return false;
-        }
         case LoadStatus::TooLarge:
-            util::AlertBox(owner_, util::LoadStr(IDS_NN),
-                           util::LoadAndMerge(IDS_FTL, util::PathLeaf(path)),
-                           MB_OK | MB_ICONEXCLAMATION);
+            prompts_.ReportError(FilePrompts::Error::TooLarge, util::PathLeaf(path));
             return false;
         case LoadStatus::AccessError:
-            util::AlertBox(owner_, util::LoadStr(IDS_NN),
-                           util::LoadAndMerge(IDS_DISKERROR, util::PathLeaf(path)),
-                           MB_OK | MB_ICONEXCLAMATION);
+            prompts_.ReportError(FilePrompts::Error::OpenFailed, util::PathLeaf(path));
             return false;
         case LoadStatus::Ok:
             break;
     }
 
-    editView_.SetText(loaded.text);
+    buffer_.SetText(loaded.text);
     document_.filePath = path;
     document_.untitled = false;
     document_.encoding = loaded.encoding;
 
     // ".LOG" files get a timestamp appended at end-of-file on open.
     if (StartsWithLogTag(loaded.text)) {
-        editView_.MoveCaretToEnd();
-        editView_.InsertText(util::FormatTimestamp(true));
+        buffer_.MoveCaretToEnd();
+        buffer_.InsertText(util::FormatTimestamp(true));
     }
+    NotifyDocumentChanged();
     return true;
 }
 
 bool FileService::SaveToPath(const std::wstring& path, TextEncoding encoding) {
-    const std::wstring text = editView_.GetText();
+    const std::wstring text = buffer_.GetText();
     bool lossy = false;
     const std::vector<std::byte> bytes = EncodeText(text, encoding, lossy);
-    if (lossy) {
-        const std::wstring message = util::LoadAndMerge(IDS_ERRUNICODE, util::PathLeaf(path));
-        if (util::AlertBox(owner_, util::LoadStr(IDS_NN), message,
-                           MB_OKCANCEL | MB_ICONEXCLAMATION) == IDCANCEL) {
-            return false;
-        }
+    if (lossy && !prompts_.AskContinueLossySave(util::PathLeaf(path))) {
+        return false;
     }
 
     switch (WriteAllBytes(path, bytes)) {
         case SaveStatus::CreateError:
-            util::AlertBox(owner_, util::LoadStr(IDS_NN),
-                           util::LoadAndMerge(IDS_CREATEERR, util::PathLeaf(path)),
-                           MB_OK | MB_ICONEXCLAMATION);
+            prompts_.ReportError(FilePrompts::Error::CreateFailed, util::PathLeaf(path));
             return false;
         case SaveStatus::WriteError:
-            util::AlertBox(owner_, util::LoadStr(IDS_NN),
-                           util::LoadAndMerge(IDS_DISKERROR, util::PathLeaf(path)),
-                           MB_OK | MB_ICONEXCLAMATION);
+            prompts_.ReportError(FilePrompts::Error::WriteFailed, util::PathLeaf(path));
             return false;
         case SaveStatus::Ok:
             break;
     }
 
-    editView_.SetModified(false);
+    buffer_.SetModified(false);
     return true;
+}
+
+void FileService::NotifyDocumentChanged() {
+    if (documentChanged_) {
+        documentChanged_();
+    }
 }
 
 } // namespace notepadxp::file

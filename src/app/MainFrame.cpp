@@ -26,7 +26,7 @@ bool ClipboardHasText() {
 } // namespace
 
 MainFrame::MainFrame()
-    : fileService_(editView_, document_),
+    : fileService_(editView_, document_, prompts_),
       findReplace_(editView_),
       printService_(editView_, settings_, document_),
       pageSetup_(settings_) {}
@@ -85,7 +85,12 @@ int MainFrame::OnCreate(LPCREATESTRUCT /*createStruct*/) {
     }
     editView_.SetCaretMovedCallback([this] { OnCaretMoved(); });
     ApplyFontFromSettings();
+    prompts_.SetOwner(m_hWnd);
     fileService_.AttachOwner(m_hWnd);
+    fileService_.SetDocumentChangedCallback([this] {
+        UpdateTitle();
+        OnCaretMoved();
+    });
     DragAcceptFiles(TRUE);  // CWindow member: enables WM_DROPFILES for this window.
 
     const bool statusVisible = settings_.statusBar && !settings_.wordWrap;
@@ -122,24 +127,16 @@ void MainFrame::OnCommand(UINT notifyCode, int id, CWindow /*control*/) {
     }
     switch (id) {
         case M_NEW:
-            if (fileService_.New()) {
-                UpdateTitle();
-                OnCaretMoved();
-            }
+            fileService_.New();
             break;
         case M_OPEN:
-            if (fileService_.Open()) {
-                UpdateTitle();
-                OnCaretMoved();
-            }
+            fileService_.Open();
             break;
         case M_SAVE:
             fileService_.Save();
             break;
         case M_SAVEAS:
-            if (fileService_.SaveAs()) {
-                UpdateTitle();
-            }
+            fileService_.SaveAs();
             break;
         case M_PAGESETUP:
             pageSetup_.ShowDialog(m_hWnd);
@@ -153,11 +150,9 @@ void MainFrame::OnCommand(UINT notifyCode, int id, CWindow /*control*/) {
 
         case M_UNDO:
             editView_.Undo();
-            OnCaretMoved();
             break;
         case M_REDO:
             editView_.Redo();
-            OnCaretMoved();
             break;
         case M_CUT:
             editView_.Cut();
@@ -240,10 +235,7 @@ void MainFrame::OnDropFiles(HDROP dropInfo) {
     wchar_t path[MAX_PATH] = {0};
     if (DragQueryFileW(dropInfo, 0, path, MAX_PATH) > 0) {
         SetActiveWindow();
-        if (fileService_.OpenPath(path)) {
-            UpdateTitle();
-            OnCaretMoved();
-        }
+        fileService_.OpenPath(path);
     }
     DragFinish(dropInfo);
 }
