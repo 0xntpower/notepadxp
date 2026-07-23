@@ -50,6 +50,13 @@ public:
         preChangeNotify_ = std::move(notify);
     }
 
+    /// @brief Register the provider consulted on Enter (Shift up): a returned
+    ///        string ("\r\n" + indent) replaces the keystroke as one edit;
+    ///        nullopt keeps the classic Enter.
+    void SetEnterIndentProvider(std::function<std::optional<std::wstring>()> provider) {
+        enterIndentProvider_ = std::move(provider);
+    }
+
     BEGIN_MSG_MAP(EditKeyHandler)
         MESSAGE_HANDLER(WM_KEYDOWN, OnKeyDown)
         MESSAGE_HANDLER(WM_CHAR, OnChar)
@@ -83,6 +90,7 @@ private:
     std::function<void()> caretNotify_;
     std::function<void(int)> wheelZoomNotify_;
     std::function<void(PendingChange)> preChangeNotify_;
+    std::function<std::optional<std::wstring>()> enterIndentProvider_;
     int wheelRemainder_ = 0;  // Accumulates sub-notch deltas from fine-scroll wheels.
 };
 

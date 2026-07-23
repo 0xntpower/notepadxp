@@ -20,6 +20,7 @@
 #include "file/Encoding.cpp"
 #include "file/FileService.cpp"
 #include "file/TextFile.cpp"
+#include "lang/IndentEngine.cpp"
 #include "lang/Language.cpp"
 #include "printing/HeaderFooter.cpp"
 #include "util/CommandLine.cpp"
@@ -719,6 +720,42 @@ void TestLanguage() {
     CHECK(SniffIndentStyle(L"", Language::Go).Unit() == L"\t");
 }
 
+void TestIndentEngine() {
+    using notepadxp::lang::ComputeEnterIndent;
+    using notepadxp::lang::IndentStyle;
+    using notepadxp::lang::Language;
+    using notepadxp::lang::TraitsFor;
+
+    const auto& cpp = TraitsFor(Language::Cpp);
+    const auto& python = TraitsFor(Language::Python);
+    const auto& go = TraitsFor(Language::Go);
+    const auto& asm_ = TraitsFor(Language::Asm);
+    const IndentStyle four{false, 4};
+    const IndentStyle two{false, 2};
+    const IndentStyle tabs{true, 4};
+
+    // Copy the current indent.
+    CHECK(ComputeEnterIndent(L"    int x = 1;", cpp, four) == L"    ");
+    CHECK(ComputeEnterIndent(L"\t\treturn x;", cpp, tabs) == L"\t\t");
+    CHECK(ComputeEnterIndent(L"no indent", cpp, four) == L"");
+
+    // Deepen after a trigger — including with trailing whitespace.
+    CHECK(ComputeEnterIndent(L"int main() {", cpp, four) == L"    ");
+    CHECK(ComputeEnterIndent(L"    if (a) {", cpp, four) == L"        ");
+    CHECK(ComputeEnterIndent(L"int main() {   ", cpp, four) == L"    ");
+    CHECK(ComputeEnterIndent(L"def f():", python, four) == L"    ");
+    CHECK(ComputeEnterIndent(L"  def g():", python, two) == L"    ");
+    CHECK(ComputeEnterIndent(L"func main() {", go, tabs) == L"\t");
+    CHECK(ComputeEnterIndent(L"\tif x {", go, tabs) == L"\t\t");
+
+    // No trigger for languages without one; a bare trigger line still deepens.
+    CHECK(ComputeEnterIndent(L"    mov eax, 1", asm_, four) == L"    ");
+    CHECK(ComputeEnterIndent(L"{", cpp, four) == L"    ");
+
+    // Whitespace-only lines never deepen (nothing beyond the indent).
+    CHECK(ComputeEnterIndent(L"    ", cpp, four) == L"    ");
+}
+
 notepadxp::editor::PendingChange Pending(notepadxp::editor::PendingChange::Kind kind, int selStart,
                                          int selEnd, std::wstring inserted = {}) {
     notepadxp::editor::PendingChange p;
@@ -905,6 +942,7 @@ int main() {
     TestDocumentShadow();
     TestCommandLine();
     TestLanguage();
+    TestIndentEngine();
     std::printf("notepadxp tests: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

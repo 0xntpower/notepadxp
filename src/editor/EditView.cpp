@@ -1,9 +1,11 @@
 #include "editor/EditView.hpp"
 
+#include <algorithm>
 #include <string>
 #include <string_view>
 
 #include "Resource.h"
+#include "lang/IndentEngine.hpp"
 
 namespace notepadxp::editor {
 
@@ -32,9 +34,29 @@ bool EditView::Create(HWND parent, bool wordWrap) {
     keyHandler_.SetPreChangeNotify([this](PendingChange pending) {
         OnPreChange(std::move(pending));
     });
+    keyHandler_.SetEnterIndentProvider([this] { return ComputeEnterReplacement(); });
     undo_.Reset();
     shadow_.Reset();
     return true;
+}
+
+std::optional<std::wstring> EditView::ComputeEnterReplacement() {
+    if (language_ == lang::Language::PlainText || language_ == lang::Language::Log) {
+        return std::nullopt;  // Classic Enter — logs and plain text never surprise.
+    }
+    int selStart = 0;
+    int selEnd = 0;
+    edit_.GetSel(selStart, selEnd);
+    const int line = edit_.LineFromChar(selStart);
+    const int lineStart = edit_.LineIndex(line);
+    const int upToCaret = selStart - lineStart;
+    if (upToCaret <= 0) {
+        return std::wstring(L"\r\n");
+    }
+    std::wstring lineText(static_cast<size_t>(upToCaret), L'\0');
+    const int copied = edit_.GetLine(line, lineText.data(), upToCaret);
+    lineText.resize(static_cast<size_t>(std::clamp(copied, 0, upToCaret)));
+    return L"\r\n" + lang::ComputeEnterIndent(lineText, lang::TraitsFor(language_), indentStyle_);
 }
 
 void EditView::OnPreChange(PendingChange pending) {

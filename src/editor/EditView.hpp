@@ -121,6 +121,7 @@ public:
 private:
     void NotifyCaretMaybeMoved();
     void OnPreChange(PendingChange pending);
+    [[nodiscard]] std::optional<std::wstring> ComputeEnterReplacement();
 
     [[nodiscard]] static DWORD StyleFor(bool wordWrap) noexcept;
     void ReapplyFont();

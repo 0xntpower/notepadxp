@@ -106,6 +106,16 @@ LRESULT EditKeyHandler::OnChar(UINT /*message*/, WPARAM wParam, LPARAM /*lParam*
     if (ch == L'\b') {
         NotifyPreChange(PendingChange::Kind::BackspaceOne);
     } else if (ch == L'\r' || ch == L'\n') {
+        // Smart indent: replace the keystroke with newline + computed indent
+        // as one edit (one undo unit). Shift+Enter keeps the classic Enter.
+        if (enterIndentProvider_ && (GetKeyState(VK_SHIFT) & 0x8000) == 0) {
+            if (const auto replacement = enterIndentProvider_()) {
+                CEdit edit(m_hWnd);
+                edit.ReplaceSel(replacement->c_str(), TRUE);  // Re-enters via our hook.
+                handled = TRUE;
+                return 0;
+            }
+        }
         NotifyPreChange(PendingChange::Kind::ReplaceSelection, L"\r\n");
     } else if (ch == L'\t' || ch >= 0x20) {
         NotifyPreChange(PendingChange::Kind::ReplaceSelection, std::wstring(1, ch));
