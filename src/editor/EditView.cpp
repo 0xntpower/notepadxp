@@ -169,13 +169,53 @@ void EditView::OnEditChanged() {
 void EditView::ApplyDelta(size_t pos, size_t removeLen, const std::wstring& insertText,
                           int selStart, int selEnd) {
     suppressRecording_ = true;
-    edit_.SetSel(static_cast<int>(pos), static_cast<int>(pos + removeLen));
-    edit_.ReplaceSel(insertText.c_str(), FALSE);
+    if (CanFastSplice(pos, removeLen, insertText)) {
+        // The classic Edit control rebuilds its whole line table for any
+        // selection-replacing edit (EM_REPLACESEL, backspace-on-selection) —
+        // O(document), ~half a second on a 10 MB file — while its single-char
+        // no-line-break path is O(edit). Replay small units through the fast
+        // path: delete one char at a time, then re-type the insertion.
+        edit_.SetSel(static_cast<int>(pos + removeLen), static_cast<int>(pos + removeLen));
+        for (size_t i = 0; i < removeLen; ++i) {
+            edit_.SendMessage(WM_CHAR, L'\b', 0);
+        }
+        for (const wchar_t ch : insertText) {
+            edit_.SendMessage(WM_CHAR, static_cast<WPARAM>(ch), 0);
+        }
+    } else {
+        edit_.SetSel(static_cast<int>(pos), static_cast<int>(pos + removeLen));
+        edit_.ReplaceSel(insertText.c_str(), FALSE);
+    }
     edit_.SetSel(selStart, selEnd);
     edit_.SendMessage(EM_SCROLLCARET);
     edit_.SetModify(TRUE);  // The document differs from its on-disk form again.
     suppressRecording_ = false;
     shadow_.ApplyExternal(pos, removeLen, insertText);
+}
+
+bool EditView::CanFastSplice(size_t pos, size_t removeLen, const std::wstring& insertText) const {
+    constexpr size_t kMaxFastEdit = 64;
+    if (removeLen > kMaxFastEdit || insertText.size() > kMaxFastEdit) {
+        return false;
+    }
+    for (const wchar_t ch : insertText) {
+        if (ch != L'\t' && ch < 0x20) {
+            return false;  // Line breaks / control chars need the generic path.
+        }
+    }
+    if (!shadow_.IsMaterialized()) {
+        return false;
+    }
+    const std::wstring& text = shadow_.Text();
+    if (pos + removeLen > text.size()) {
+        return false;
+    }
+    for (size_t i = pos; i < pos + removeLen; ++i) {
+        if (text[i] == L'\r' || text[i] == L'\n') {
+            return false;  // Removing a line break forces the rebuild anyway.
+        }
+    }
+    return true;
 }
 
 void EditView::Cut() {

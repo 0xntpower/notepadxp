@@ -121,6 +121,8 @@ private:
     void ReapplyFont();
     void ApplyDelta(size_t pos, size_t removeLen, const std::wstring& insertText, int selStart,
                     int selEnd);
+    [[nodiscard]] bool CanFastSplice(size_t pos, size_t removeLen,
+                                     const std::wstring& insertText) const;
 
     CEdit edit_;
     EditKeyHandler keyHandler_;  // Subclasses edit_: word-delete + caret notify.

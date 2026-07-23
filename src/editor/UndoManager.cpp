@@ -6,7 +6,9 @@ namespace notepadxp::editor {
 
 namespace {
 
-bool IsSpace(wchar_t ch) {
+// Named distinctly from EditKeyHandler's IsSpace: implementation files are
+// textually combined into one TU by the test and bench builds.
+bool IsUndoBreakSpace(wchar_t ch) {
     return std::iswspace(static_cast<wint_t>(ch)) != 0;
 }
 
@@ -23,8 +25,9 @@ void UndoManager::RecordChange(const EditDelta& delta) {
         const bool contiguous = delta.pos == top.pos + top.inserted.size();
         // Break before the first letter of a new word so undo removes a word
         // at a time.
-        const bool wordStart = !IsSpace(delta.inserted[0]) && delta.charBeforePos != L'\0' &&
-                               IsSpace(delta.charBeforePos);
+        const bool wordStart = !IsUndoBreakSpace(delta.inserted[0]) &&
+                               delta.charBeforePos != L'\0' &&
+                               IsUndoBreakSpace(delta.charBeforePos);
         if (contiguous && !wordStart) {
             top.inserted += delta.inserted;
             top.selStartAfter = delta.selStartAfter;

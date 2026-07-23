@@ -434,6 +434,7 @@ FodyWeavers.xsd
 # vcbuild output directories and intermediates
 /build/
 /tests/build/
+/bench/build/
 *.res
 .vcbuild_cache/
 

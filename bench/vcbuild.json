@@ -1,0 +1,37 @@
+{
+  "$comment": "On-demand performance harness for NotepadXP. Creates a real (hidden) Edit control wired through EditView and measures load, typing latency, undo, and zoom. Bench.cpp includes the implementation .cpp files directly, like tests/. Run from this directory: python ../../vcbuild/vcbuild.py release, then ./build/notepadxp_bench.exe",
+
+  "project": {
+    "name": "notepadxp_bench",
+    "type": "exe",
+    "output_dir": "build",
+    "architecture": "x64",
+    "output_name": "notepadxp_bench.exe"
+  },
+
+  "compiler": {
+    "standard": "c++20",
+    "char_set": "unicode",
+    "exceptions": true,
+    "defines": ["WIN32_LEAN_AND_MEAN", "NOMINMAX", "STRICT", "UNICODE", "_UNICODE"],
+    "warnings": {
+      "level": 4,
+      "as_errors": false
+    }
+  },
+
+  "linker": {
+    "subsystem": "console",
+    "libraries": ["user32.lib", "gdi32.lib"]
+  },
+
+  "sources": {
+    "include_dirs": [".", "../src", "../res", "../extern/wtl/include"],
+    "source_dirs": ["."]
+  },
+
+  "profiles": {
+    "debug": { "compiler": { "defines": ["_DEBUG"] } },
+    "release": { "compiler": { "defines": ["NDEBUG"] } }
+  }
+}
