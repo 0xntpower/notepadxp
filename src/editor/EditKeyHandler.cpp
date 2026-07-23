@@ -34,7 +34,7 @@ std::wstring ControlText(CEdit& edit) {
 } // namespace
 
 LRESULT EditKeyHandler::OnKeyDown(UINT /*message*/, WPARAM wParam, LPARAM lParam, BOOL& handled) {
-    if (IsCtrlDown() && !IsAltDown()) {  // exclude AltGr (Ctrl+Alt)
+    if (IsCtrlDown() && !IsAltDown() && !inWordDelete_) {  // exclude AltGr (Ctrl+Alt)
         if (wParam == VK_BACK) {
             DeleteWordLeft();
             handled = TRUE;
@@ -192,6 +192,35 @@ void EditKeyHandler::DeleteWordLeft() {
         return;
     }
 
+    // Fast path when the whole deletion stays on the current line: per-char
+    // backspaces use the control's incremental path (O(edit)), while a
+    // selection-replace rebuilds its whole line table (O(document)).
+    const int line = edit.LineFromChar(start);
+    const int lineStart = edit.LineIndex(line);
+    const int caretInLine = start - lineStart;
+    if (caretInLine > 0) {
+        std::wstring lineText(static_cast<size_t>(caretInLine), L'\0');
+        const int copied = edit.GetLine(line, lineText.data(), caretInLine);
+        if (copied >= caretInLine) {
+            int boundary = caretInLine;
+            while (boundary > 0 && IsSpace(lineText[static_cast<size_t>(boundary) - 1])) {
+                --boundary;  // skip the whitespace run
+            }
+            if (boundary > 0 || lineStart == 0) {  // Never crosses the line break.
+                while (boundary > 0 && !IsSpace(lineText[static_cast<size_t>(boundary) - 1])) {
+                    --boundary;  // skip the word
+                }
+                for (int i = 0; i < caretInLine - boundary; ++i) {
+                    edit.SendMessageW(WM_CHAR, L'\b', 0);
+                }
+                edit.SendMessageW(EM_SCROLLCARET);
+                return;
+            }
+        }
+    }
+
+    // The deletion crosses the line break (or the prefix is all whitespace):
+    // the generic whole-text path handles it.
     const std::wstring text = ControlText(edit);
     int boundary = start;
     while (boundary > 0 && IsSpace(text[static_cast<size_t>(boundary) - 1])) {
@@ -213,6 +242,35 @@ void EditKeyHandler::DeleteWordRight() {
     if (start != end) {
         edit.ReplaceSel(L"", TRUE);
         return;
+    }
+
+    // Fast path when the whole deletion stays on the current line (see
+    // DeleteWordLeft): replay as plain VK_DELETEs through our own subclass.
+    const int line = edit.LineFromChar(start);
+    const int lineStart = edit.LineIndex(line);
+    const int caretInLine = start - lineStart;
+    const int lineLen = edit.LineLength(start);
+    if (caretInLine < lineLen) {
+        std::wstring lineText(static_cast<size_t>(lineLen), L'\0');
+        const int copied = edit.GetLine(line, lineText.data(), lineLen);
+        if (copied >= lineLen) {
+            int boundary = caretInLine;
+            while (boundary < lineLen && !IsSpace(lineText[static_cast<size_t>(boundary)])) {
+                ++boundary;  // skip the word
+            }
+            while (boundary < lineLen && IsSpace(lineText[static_cast<size_t>(boundary)])) {
+                ++boundary;  // skip the trailing whitespace run
+            }
+            if (boundary < lineLen) {  // Never reaches the line break.
+                inWordDelete_ = true;
+                for (int i = 0; i < boundary - caretInLine; ++i) {
+                    edit.SendMessageW(WM_KEYDOWN, VK_DELETE, 0);
+                }
+                inWordDelete_ = false;
+                edit.SendMessageW(EM_SCROLLCARET);
+                return;
+            }
+        }
     }
 
     const std::wstring text = ControlText(edit);

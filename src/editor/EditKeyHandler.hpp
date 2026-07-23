@@ -92,6 +92,7 @@ private:
     std::function<void(PendingChange)> preChangeNotify_;
     std::function<std::optional<std::wstring>()> enterIndentProvider_;
     int wheelRemainder_ = 0;  // Accumulates sub-notch deltas from fine-scroll wheels.
+    bool inWordDelete_ = false;  // Synthetic VK_DELETEs must not re-enter word-delete.
 };
 
 } // namespace notepadxp::editor
