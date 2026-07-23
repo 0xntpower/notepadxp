@@ -10,6 +10,7 @@
 #include "dialogs/FontDialog.hpp"
 #include "dialogs/GoToDialog.hpp"
 #include "file/Encoding.hpp"
+#include "lang/BraceMatch.hpp"
 #include "lang/Language.hpp"
 #include "util/DateTime.hpp"
 #include "util/PathName.hpp"
@@ -183,6 +184,21 @@ void MainFrame::OnCommand(UINT notifyCode, int id, CWindow /*control*/) {
         case M_GOTO:
             OnGoTo();
             break;
+        case M_MATCHBRACE: {
+            int selStart = 0;
+            int selEnd = 0;
+            editView_.GetSelection(selStart, selEnd);
+            const std::wstring text = editView_.GetText();
+            const auto match = lang::FindMatchingBrace(
+                text, static_cast<size_t>(selStart),
+                lang::TraitsFor(fileService_.Document().language));
+            if (match.has_value()) {
+                editView_.SelectRange(static_cast<int>(*match), static_cast<int>(*match) + 1);
+            } else {
+                MessageBeep(MB_ICONEXCLAMATION);
+            }
+            break;
+        }
         case M_SELECTALL:
             editView_.SelectAll();
             break;
@@ -377,6 +393,7 @@ void MainFrame::UpdateMenuState() {
     enable(M_FIND, hasText);
     enable(M_FINDNEXT, hasText);
     enable(M_REPLACE, hasText);
+    enable(M_MATCHBRACE, hasText);
 
     enable(M_GOTO, !settings_.wordWrap);
 

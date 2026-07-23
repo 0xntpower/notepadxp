@@ -20,6 +20,7 @@
 #include "file/Encoding.cpp"
 #include "file/FileService.cpp"
 #include "file/TextFile.cpp"
+#include "lang/BraceMatch.cpp"
 #include "lang/IndentEngine.cpp"
 #include "lang/Language.cpp"
 #include "printing/HeaderFooter.cpp"
@@ -756,6 +757,46 @@ void TestIndentEngine() {
     CHECK(ComputeEnterIndent(L"    ", cpp, four) == L"    ");
 }
 
+void TestBraceMatch() {
+    using notepadxp::lang::FindMatchingBrace;
+    using notepadxp::lang::Language;
+    using notepadxp::lang::TraitsFor;
+    const auto& cpp = TraitsFor(Language::Cpp);
+    const auto& python = TraitsFor(Language::Python);
+    const auto& json = TraitsFor(Language::Json);
+
+    // Nested pairs, both directions; caret on or just after a bracket.
+    const std::wstring nested = L"a{b[c(d)e]f}g";
+    CHECK(FindMatchingBrace(nested, 1, cpp) == std::optional<size_t>(11));   // { -> }
+    CHECK(FindMatchingBrace(nested, 11, cpp) == std::optional<size_t>(1));   // } -> {
+    CHECK(FindMatchingBrace(nested, 3, cpp) == std::optional<size_t>(9));    // [ -> ]
+    CHECK(FindMatchingBrace(nested, 5, cpp) == std::optional<size_t>(7));    // ( -> )
+    CHECK(FindMatchingBrace(nested, 6, cpp) == std::optional<size_t>(7));    // after ( -> )
+    CHECK(!FindMatchingBrace(nested, 0, cpp).has_value());                   // Not a bracket.
+
+    // Brackets inside strings and comments never participate (C++).
+    const std::wstring code = L"f(\"a}b\"); // }\n{ /* } */ x }";
+    //                          01 234567    ...
+    CHECK(FindMatchingBrace(code, 1, cpp) == std::optional<size_t>(7));      // ( skips "a}b"
+    const size_t bracePos = code.find(L'\n') + 1;
+    CHECK(FindMatchingBrace(code, bracePos, cpp) == std::optional<size_t>(code.size() - 1));
+    // A bracket inside a string cannot be matched from.
+    CHECK(!FindMatchingBrace(code, 4, cpp).has_value());
+
+    // Python: # comments hide brackets, strings honored.
+    const std::wstring py = L"d = {'k': [1, 2]}  # }";
+    CHECK(FindMatchingBrace(py, 4, python) == std::optional<size_t>(16));
+    CHECK(FindMatchingBrace(py, 10, python) == std::optional<size_t>(15));
+
+    // JSON with escapes in strings.
+    const std::wstring js = L"{\"a\": \"x\\\"}y\", \"b\": [1]}";
+    CHECK(FindMatchingBrace(js, 0, json) == std::optional<size_t>(js.size() - 1));
+
+    // Unbalanced: no match.
+    CHECK(!FindMatchingBrace(L"{ open", 0, cpp).has_value());
+    CHECK(!FindMatchingBrace(L"close }", 6, cpp).has_value());
+}
+
 notepadxp::editor::PendingChange Pending(notepadxp::editor::PendingChange::Kind kind, int selStart,
                                          int selEnd, std::wstring inserted = {}) {
     notepadxp::editor::PendingChange p;
@@ -943,6 +984,7 @@ int main() {
     TestCommandLine();
     TestLanguage();
     TestIndentEngine();
+    TestBraceMatch();
     std::printf("notepadxp tests: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }
