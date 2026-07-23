@@ -44,6 +44,10 @@
 #define M_SETFONT               40031
 // View
 #define M_STATUSBAR             40040
+// Zoom (accelerator-only commands; no menu items — classic look).
+#define M_ZOOMIN                40041
+#define M_ZOOMOUT               40042
+#define M_ZOOMRESET             40043
 // Help
 #define M_HELP                  40050
 #define M_ABOUT                 40051

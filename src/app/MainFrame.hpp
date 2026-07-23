@@ -76,6 +76,7 @@ private:
     void UpdateMenuState();
     void SaveWindowPlacement();
     void OnCaretMoved();
+    void AdjustZoom(int steps);
 
     settings::Settings settings_;
     file::DocumentState document_;
@@ -87,6 +88,10 @@ private:
     dialogs::FindReplaceController findReplace_;
     printing::PrintService printService_;
     printing::PageSetup pageSetup_;
+
+    // View-only zoom multiplier; 100 == the configured font size (the floor).
+    // Session-only by design: never persisted, dies with the window.
+    int zoomPercent_ = 100;
 };
 
 } // namespace notepadxp::app

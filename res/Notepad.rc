@@ -88,6 +88,12 @@ BEGIN
     "C",        M_COPY,         VIRTKEY, CONTROL
     "V",        M_PASTE,        VIRTKEY, CONTROL
     "A",        M_SELECTALL,    VIRTKEY, CONTROL
+    VK_OEM_PLUS,  M_ZOOMIN,     VIRTKEY, CONTROL
+    VK_ADD,       M_ZOOMIN,     VIRTKEY, CONTROL
+    VK_OEM_MINUS, M_ZOOMOUT,    VIRTKEY, CONTROL
+    VK_SUBTRACT,  M_ZOOMOUT,    VIRTKEY, CONTROL
+    "0",          M_ZOOMRESET,  VIRTKEY, CONTROL
+    VK_NUMPAD0,   M_ZOOMRESET,  VIRTKEY, CONTROL
 END
 
 /////////////////////////////////////////////////////////////////////////////

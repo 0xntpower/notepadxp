@@ -84,6 +84,7 @@ int MainFrame::OnCreate(LPCREATESTRUCT /*createStruct*/) {
         return -1;
     }
     editView_.SetCaretMovedCallback([this] { OnCaretMoved(); });
+    editView_.SetWheelZoomCallback([this](int steps) { AdjustZoom(steps); });
     ApplyFontFromSettings();
     prompts_.SetOwner(m_hWnd);
     fileService_.AttachOwner(m_hWnd);
@@ -187,6 +188,15 @@ void MainFrame::OnCommand(UINT notifyCode, int id, CWindow /*control*/) {
 
         case M_WORDWRAP:
             OnToggleWordWrap();
+            break;
+        case M_ZOOMIN:
+            AdjustZoom(1);
+            break;
+        case M_ZOOMOUT:
+            AdjustZoom(-1);
+            break;
+        case M_ZOOMRESET:
+            AdjustZoom(-(zoomPercent_ - 100) / 10);  // Straight back to 100%.
             break;
         case M_SETFONT:
             OnChooseFont();
@@ -313,9 +323,24 @@ void MainFrame::LayoutChildren() {
 
 void MainFrame::ApplyFontFromSettings() {
     HDC dc = ::GetDC(nullptr);
-    const LOGFONTW logFont = settings_.ResolvedFont(dc);
+    const LOGFONTW logFont = settings_.ResolvedFont(dc, zoomPercent_);
     ::ReleaseDC(nullptr, dc);
     editView_.SetFont(logFont);
+}
+
+void MainFrame::AdjustZoom(int steps) {
+    constexpr int kZoomStep = 10;
+    constexpr int kZoomFloor = 100;  // The configured font size; never smaller.
+    constexpr int kZoomCeiling = 500;
+    const int target = zoomPercent_ + steps * kZoomStep;
+    const int clamped = target < kZoomFloor ? kZoomFloor
+                        : target > kZoomCeiling ? kZoomCeiling
+                                                : target;
+    if (clamped == zoomPercent_) {
+        return;
+    }
+    zoomPercent_ = clamped;
+    ApplyFontFromSettings();
 }
 
 void MainFrame::UpdateTitle() {

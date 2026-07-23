@@ -68,6 +68,21 @@ LRESULT EditKeyHandler::OnMouseMove(UINT message, WPARAM wParam, LPARAM lParam, 
     return OnCaretMessage(message, wParam, lParam, handled);
 }
 
+LRESULT EditKeyHandler::OnMouseWheel(UINT /*message*/, WPARAM wParam, LPARAM /*lParam*/,
+                                     BOOL& handled) {
+    if ((GET_KEYSTATE_WPARAM(wParam) & MK_CONTROL) == 0 || !wheelZoomNotify_) {
+        handled = FALSE;  // Plain wheel: let the control scroll.
+        return 0;
+    }
+    wheelRemainder_ += GET_WHEEL_DELTA_WPARAM(wParam);
+    const int steps = wheelRemainder_ / WHEEL_DELTA;
+    if (steps != 0) {
+        wheelRemainder_ -= steps * WHEEL_DELTA;
+        wheelZoomNotify_(steps);
+    }
+    return 0;  // Swallowed: Ctrl+wheel must not also scroll.
+}
+
 void EditKeyHandler::NotifyCaret() {
     if (caretNotify_) {
         caretNotify_();

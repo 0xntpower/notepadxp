@@ -107,6 +107,11 @@ public:
         caretMoved_ = std::move(callback);
     }
 
+    /// @brief Register the owner's listener for Ctrl+wheel zoom steps.
+    void SetWheelZoomCallback(std::function<void(int steps)> callback) {
+        keyHandler_.SetWheelZoomNotify(std::move(callback));
+    }
+
 private:
     void NotifyCaretMaybeMoved();
 

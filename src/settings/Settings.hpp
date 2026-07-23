@@ -50,9 +50,10 @@ struct Settings {
     ///        (e.g. no write access) are silently ignored.
     void Save() const;
 
-    /// @brief Produce a LOGFONTW for @p dc with lfHeight derived from pointSize,
-    ///        suitable for CreateFontIndirect. @p dc supplies the device DPI.
-    [[nodiscard]] LOGFONTW ResolvedFont(HDC dc) const;
+    /// @brief Produce a LOGFONTW for @p dc with lfHeight derived from pointSize
+    ///        scaled by @p zoomPercent (a view-only multiplier; 100 == the
+    ///        configured size), suitable for CreateFontIndirect.
+    [[nodiscard]] LOGFONTW ResolvedFont(HDC dc, int zoomPercent = 100) const;
 };
 
 } // namespace notepadxp::settings

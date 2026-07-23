@@ -138,10 +138,10 @@ void Settings::Save() const {
     key.SetString(L"szTrailer", footer);
 }
 
-LOGFONTW Settings::ResolvedFont(HDC dc) const {
+LOGFONTW Settings::ResolvedFont(HDC dc, int zoomPercent) const {
     LOGFONTW lf = font;
     const int dpiY = GetDeviceCaps(dc, LOGPIXELSY);
-    lf.lfHeight = -MulDiv(pointSize, dpiY, kPointSizeScale);
+    lf.lfHeight = -MulDiv(MulDiv(pointSize, zoomPercent, 100), dpiY, kPointSizeScale);
     lf.lfWidth = 0;  // Let the mapper choose the matching width.
     return lf;
 }

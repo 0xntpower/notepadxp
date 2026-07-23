@@ -31,12 +31,20 @@ public:
         caretNotify_ = std::move(notify);
     }
 
+    /// @brief Register the listener for Ctrl+wheel zoom. @p steps is signed
+    ///        (+1 per notch up); the wheel message is swallowed when Ctrl is
+    ///        down so the view does not also scroll.
+    void SetWheelZoomNotify(std::function<void(int steps)> notify) {
+        wheelZoomNotify_ = std::move(notify);
+    }
+
     BEGIN_MSG_MAP(EditKeyHandler)
         MESSAGE_HANDLER(WM_KEYDOWN, OnKeyDown)
         MESSAGE_HANDLER(WM_CHAR, OnChar)
         MESSAGE_HANDLER(WM_LBUTTONDOWN, OnCaretMessage)
         MESSAGE_HANDLER(WM_LBUTTONUP, OnCaretMessage)
         MESSAGE_HANDLER(WM_MOUSEMOVE, OnMouseMove)
+        MESSAGE_HANDLER(WM_MOUSEWHEEL, OnMouseWheel)
         MESSAGE_HANDLER(EM_SETSEL, OnCaretMessage)
     END_MSG_MAP()
 
@@ -45,12 +53,15 @@ private:
     LRESULT OnChar(UINT message, WPARAM wParam, LPARAM lParam, BOOL& handled);
     LRESULT OnCaretMessage(UINT message, WPARAM wParam, LPARAM lParam, BOOL& handled);
     LRESULT OnMouseMove(UINT message, WPARAM wParam, LPARAM lParam, BOOL& handled);
+    LRESULT OnMouseWheel(UINT message, WPARAM wParam, LPARAM lParam, BOOL& handled);
 
     void DeleteWordLeft();
     void DeleteWordRight();
     void NotifyCaret();
 
     std::function<void()> caretNotify_;
+    std::function<void(int)> wheelZoomNotify_;
+    int wheelRemainder_ = 0;  // Accumulates sub-notch deltas from fine-scroll wheels.
 };
 
 } // namespace notepadxp::editor
