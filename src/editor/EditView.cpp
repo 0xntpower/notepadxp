@@ -112,6 +112,7 @@ bool EditView::SetWordWrap(bool wordWrap) {
     wordWrap_ = wordWrap;
 
     ReapplyFont();
+    ApplyTabStops();  // The language's tab stops must survive the recreate.
     suppressRecording_ = true;  // Re-set text on the new control is not a user edit.
     edit_.SetWindowText(text.c_str());
     suppressRecording_ = false;
@@ -119,6 +120,23 @@ bool EditView::SetWordWrap(bool wordWrap) {
     edit_.SetSel(selStart, selEnd);
     edit_.SendMessage(EM_SCROLLCARET);
     return true;
+}
+
+void EditView::SetLanguageContext(lang::Language language, lang::IndentStyle indentStyle) {
+    language_ = language;
+    indentStyle_ = indentStyle;
+    ApplyTabStops();
+}
+
+void EditView::ApplyTabStops() {
+    if (edit_.m_hWnd == nullptr) {
+        return;
+    }
+    // EM_SETTABSTOPS takes dialog-template units; 4 units ~= one average char
+    // (the control default of 32 == 8 characters).
+    int stops = lang::TraitsFor(language_).tabStopChars * 4;
+    edit_.SetTabStops(stops);
+    edit_.Invalidate();
 }
 
 void EditView::SetFont(const LOGFONTW& logFont) {

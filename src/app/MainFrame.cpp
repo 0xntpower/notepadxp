@@ -10,6 +10,7 @@
 #include "dialogs/FontDialog.hpp"
 #include "dialogs/GoToDialog.hpp"
 #include "file/Encoding.hpp"
+#include "lang/Language.hpp"
 #include "util/DateTime.hpp"
 #include "util/PathName.hpp"
 #include "util/StringTable.hpp"
@@ -89,6 +90,9 @@ int MainFrame::OnCreate(LPCREATESTRUCT /*createStruct*/) {
     prompts_.SetOwner(m_hWnd);
     fileService_.AttachOwner(m_hWnd);
     fileService_.SetDocumentChangedCallback([this] {
+        const file::DocumentState& doc = fileService_.Document();
+        editView_.SetLanguageContext(doc.language, doc.indentStyle);
+        statusBar_.SetLanguageName(lang::TraitsFor(doc.language).displayName);
         UpdateTitle();
         OnCaretMoved();
     });

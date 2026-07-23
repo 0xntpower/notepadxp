@@ -11,6 +11,7 @@
 #include "editor/EditKeyHandler.hpp"
 #include "editor/UndoManager.hpp"
 #include "file/TextBuffer.hpp"
+#include "lang/Language.hpp"
 #include "util/GdiGuard.hpp"
 
 namespace notepadxp::editor {
@@ -113,12 +114,17 @@ public:
         keyHandler_.SetWheelZoomNotify(std::move(callback));
     }
 
+    /// @brief Adopt the detected language and indent style: applies the
+    ///        language's tab stops and drives the smart-edit behavior.
+    void SetLanguageContext(lang::Language language, lang::IndentStyle indentStyle);
+
 private:
     void NotifyCaretMaybeMoved();
     void OnPreChange(PendingChange pending);
 
     [[nodiscard]] static DWORD StyleFor(bool wordWrap) noexcept;
     void ReapplyFont();
+    void ApplyTabStops();
     void ApplyDelta(size_t pos, size_t removeLen, const std::wstring& insertText, int selStart,
                     int selEnd);
     [[nodiscard]] bool CanFastSplice(size_t pos, size_t removeLen,
@@ -132,6 +138,8 @@ private:
     int lastCaretLine_ = 0;  // Dedupe cache for caret notifications (0 == none yet).
     int lastCaretCol_ = 0;
     DocumentShadow shadow_;  // Mirrors the control text; derives undo deltas.
+    lang::Language language_ = lang::Language::PlainText;
+    lang::IndentStyle indentStyle_{};
     bool wordWrap_ = false;
     bool suppressRecording_ = false;  // True while we change text programmatically.
     HWND parent_ = nullptr;

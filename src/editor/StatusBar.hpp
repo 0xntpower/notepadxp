@@ -2,6 +2,8 @@
 
 // StatusBar.hpp — The optional bottom status bar showing the caret Ln/Col.
 
+#include <string_view>
+
 #include "WtlIncludes.hpp"
 
 namespace notepadxp::editor {
@@ -35,6 +37,10 @@ public:
 
     /// @brief Set the caret position display (1-based line and column).
     void SetLineCol(int line, int col);
+
+    /// @brief Set the detected-language display in the left part (empty for
+    ///        plain text keeps the classic look).
+    void SetLanguageName(std::wstring_view name);
 
 private:
     CStatusBarCtrl status_;

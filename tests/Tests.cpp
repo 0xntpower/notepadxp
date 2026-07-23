@@ -404,6 +404,35 @@ void TestFileService() {
         CHECK(doc.filePath == path);
     }
 
+    // Detection rides the load path: language + indent style land on the document.
+    {
+        FakeTextBuffer buffer;
+        FakePrompts prompts;
+        DocumentState doc;
+        FileService svc(buffer, doc, prompts);
+        bool lossy = true;
+
+        const std::wstring jsonPath = TempFilePath(L"notepadxp_filesvc_detect.json");
+        CHECK(WriteAllBytes(jsonPath,
+                            EncodeText(L"{\"a\": [1, 2]}", TextEncoding::Utf8, lossy)) ==
+              SaveStatus::Ok);
+        CHECK(svc.OpenPath(jsonPath));
+        CHECK(doc.language == notepadxp::lang::Language::Json);
+        DeleteFileW(jsonPath.c_str());
+
+        const std::wstring pyPath = TempFilePath(L"notepadxp_filesvc_detect.py");
+        CHECK(WriteAllBytes(pyPath, EncodeText(L"def f():\n  a()\n  b()\n  c()\n",
+                                               TextEncoding::Utf8, lossy)) == SaveStatus::Ok);
+        CHECK(svc.OpenPath(pyPath));
+        CHECK(doc.language == notepadxp::lang::Language::Python);
+        CHECK(!doc.indentStyle.useTabs);
+        CHECK(doc.indentStyle.width == 2);
+        DeleteFileW(pyPath.c_str());
+
+        CHECK(svc.New());
+        CHECK(doc.language == notepadxp::lang::Language::PlainText);
+    }
+
     // The lossy-save gate: decline leaves the file unwritten and the buffer dirty.
     {
         FakeTextBuffer buffer;

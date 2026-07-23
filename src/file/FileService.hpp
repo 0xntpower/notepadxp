@@ -70,6 +70,7 @@ private:
     [[nodiscard]] bool CheckSave();  // Prompt-to-save gate; false == user cancelled.
     [[nodiscard]] bool LoadFromPath(const std::wstring& path, std::optional<TextEncoding> forced);
     [[nodiscard]] bool SaveToPath(const std::wstring& path, TextEncoding encoding);
+    void DetectDocumentLanguage(const std::wstring& text);
     void NotifyDocumentChanged();
 
     TextBuffer& buffer_;

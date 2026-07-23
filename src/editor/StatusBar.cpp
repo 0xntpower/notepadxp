@@ -67,6 +67,14 @@ int StatusBar::Height() {
     return rc.bottom - rc.top;
 }
 
+void StatusBar::SetLanguageName(std::wstring_view name) {
+    if (status_.m_hWnd == nullptr) {
+        return;
+    }
+    const std::wstring text = name.empty() ? std::wstring() : L"  " + std::wstring(name);
+    status_.SetText(0, text.c_str());
+}
+
 void StatusBar::SetLineCol(int line, int col) {
     if (status_.m_hWnd == nullptr) {
         return;

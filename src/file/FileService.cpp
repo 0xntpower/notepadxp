@@ -1,5 +1,6 @@
 #include "file/FileService.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -16,12 +17,22 @@ namespace notepadxp::file {
 
 namespace {
 
+// Text prefix handed to language detection / indent sniffing.
+constexpr size_t kDetectPrefixChars = 64 * 1024;
+
 // True when the document begins with the classic ".LOG" auto-timestamp marker.
 bool StartsWithLogTag(const std::wstring& text) {
     return text.compare(0, 4, L".LOG") == 0;
 }
 
 } // namespace
+
+void FileService::DetectDocumentLanguage(const std::wstring& text) {
+    const std::wstring_view prefix = std::wstring_view(text).substr(
+        0, std::min(text.size(), kDetectPrefixChars));
+    document_.language = lang::DetectLanguage(document_.filePath, prefix);
+    document_.indentStyle = lang::SniffIndentStyle(prefix, document_.language);
+}
 
 bool FileService::New() {
     if (!CheckSave()) {
@@ -31,6 +42,8 @@ bool FileService::New() {
     document_.filePath.clear();
     document_.untitled = true;
     document_.encoding = TextEncoding::Ansi;
+    document_.language = lang::Language::PlainText;
+    document_.indentStyle = {};
     NotifyDocumentChanged();
     return true;
 }
@@ -67,6 +80,7 @@ bool FileService::SaveAs() {
     document_.filePath = result->path;
     document_.untitled = false;
     document_.encoding = result->encoding;
+    DetectDocumentLanguage(buffer_.GetText());  // The new name may change the language.
     NotifyDocumentChanged();
     return true;
 }
@@ -114,6 +128,7 @@ bool FileService::LoadFromPath(const std::wstring& path, std::optional<TextEncod
                 document_.filePath = path;
                 document_.untitled = false;
                 document_.encoding = TextEncoding::Ansi;
+                DetectDocumentLanguage(std::wstring());  // Extension decides.
                 NotifyDocumentChanged();
                 return true;
             }
@@ -132,6 +147,7 @@ bool FileService::LoadFromPath(const std::wstring& path, std::optional<TextEncod
     document_.filePath = path;
     document_.untitled = false;
     document_.encoding = loaded.encoding;
+    DetectDocumentLanguage(loaded.text);
 
     // ".LOG" files get a timestamp appended at end-of-file on open.
     if (StartsWithLogTag(loaded.text)) {
