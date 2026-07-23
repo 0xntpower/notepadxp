@@ -20,6 +20,7 @@
 #include "file/Encoding.cpp"
 #include "file/FileService.cpp"
 #include "file/TextFile.cpp"
+#include "lang/Language.cpp"
 #include "printing/HeaderFooter.cpp"
 #include "util/CommandLine.cpp"
 #include "util/DateTime.cpp"
@@ -613,6 +614,82 @@ void TestUndoManager() {
     }
 }
 
+void TestLanguage() {
+    using notepadxp::lang::DetectLanguage;
+    using notepadxp::lang::IndentStyle;
+    using notepadxp::lang::Language;
+    using notepadxp::lang::SniffIndentStyle;
+    using notepadxp::lang::TraitsFor;
+
+    // Extension map.
+    CHECK(DetectLanguage(L"C:\\x\\data.json", L"") == Language::Json);
+    CHECK(DetectLanguage(L"app.log", L"") == Language::Log);
+    CHECK(DetectLanguage(L"boot.asm", L"") == Language::Asm);
+    CHECK(DetectLanguage(L"start.s", L"") == Language::Asm);
+    CHECK(DetectLanguage(L"main.c", L"") == Language::C);
+    CHECK(DetectLanguage(L"view.cpp", L"") == Language::Cpp);
+    CHECK(DetectLanguage(L"view.HPP", L"") == Language::Cpp);  // Case-insensitive.
+    CHECK(DetectLanguage(L"App.java", L"") == Language::Java);
+    CHECK(DetectLanguage(L"main.go", L"") == Language::Go);
+    CHECK(DetectLanguage(L"tool.py", L"") == Language::Python);
+    CHECK(DetectLanguage(L"build.bat", L"") == Language::Batch);
+    CHECK(DetectLanguage(L"deploy.cmd", L"") == Language::Batch);
+    CHECK(DetectLanguage(L"run.sh", L"") == Language::Bash);
+    CHECK(DetectLanguage(L"setup.ps1", L"") == Language::PowerShell);
+    CHECK(DetectLanguage(L"trace.wds", L"") == Language::WinDbg);
+
+    // Ambiguous .h: C++ markers decide; empty defaults to C++.
+    CHECK(DetectLanguage(L"api.h", L"class Widget { public: void Draw(); };") == Language::Cpp);
+    CHECK(DetectLanguage(L"api.h", L"typedef struct point { int x; } point;\nint add(int a);") ==
+          Language::C);
+    CHECK(DetectLanguage(L"api.h", L"") == Language::Cpp);
+
+    // Content sniff for .txt / extensionless.
+    CHECK(DetectLanguage(L"script.txt", L"#!/bin/bash\necho hi") == Language::Bash);
+    CHECK(DetectLanguage(L"script", L"#!/usr/bin/env python3\nprint(1)") == Language::Python);
+    CHECK(DetectLanguage(L"payload", L"{\"a\": [1, 2.5e3], \"b\": null, \"c\": \"x\"}") ==
+          Language::Json);
+    CHECK(DetectLanguage(L"notes.txt", L"The quick brown fox\njumps over\nthe lazy dog\n") ==
+          Language::PlainText);
+    CHECK(DetectLanguage(L"output",
+                         L"2026-07-23 10:00:01 INFO started\n"
+                         L"2026-07-23 10:00:02 INFO listening\n"
+                         L"2026-07-23 10:00:05 ERROR timeout\n") == Language::Log);
+    CHECK(DetectLanguage(L"bp.txt",
+                         L"$$ set up breakpoints\nbp nt!NtOpenFile\n.echo attached\n") ==
+          Language::WinDbg);
+    // C-ish braces at the start must not read as JSON.
+    CHECK(DetectLanguage(L"snippet", L"{ int x = f(y); }") == Language::PlainText);
+
+    // Traits spot checks.
+    CHECK(TraitsFor(Language::Batch).lineComment == L"REM");
+    CHECK(TraitsFor(Language::Batch).lineCommentAlt == L"::");
+    CHECK(TraitsFor(Language::Python).indentTriggers == L":");
+    CHECK(TraitsFor(Language::WinDbg).lineComment == L"$$");
+    CHECK(TraitsFor(Language::Asm).tabStopChars == 8);
+    CHECK(TraitsFor(Language::Cpp).tabStopChars == 4);
+    CHECK(TraitsFor(Language::PlainText).displayName.empty());
+
+    // Indent sniffing.
+    const IndentStyle two =
+        SniffIndentStyle(L"def f():\n  a()\n  b()\n  c()\n", Language::Python);
+    CHECK(!two.useTabs);
+    CHECK(two.width == 2);
+    const IndentStyle tabs =
+        SniffIndentStyle(L"func main() {\n\tx()\n\ty()\n\tz()\n}\n", Language::Cpp);
+    CHECK(tabs.useTabs);
+    const IndentStyle mixed = SniffIndentStyle(
+        L"a {\n    b\n        c\n    d\n        e\n    f\n}\n", Language::Cpp);
+    CHECK(!mixed.useTabs);
+    CHECK(mixed.width == 4);
+    // No evidence: language defaults.
+    CHECK(SniffIndentStyle(L"abc\ndef\n", Language::Python).width == 4);
+    CHECK(SniffIndentStyle(L"abc\ndef\n", Language::Go).useTabs);
+    CHECK(SniffIndentStyle(L"", Language::Json).width == 2);
+    CHECK(SniffIndentStyle(L"", Language::Json).Unit() == L"  ");
+    CHECK(SniffIndentStyle(L"", Language::Go).Unit() == L"\t");
+}
+
 notepadxp::editor::PendingChange Pending(notepadxp::editor::PendingChange::Kind kind, int selStart,
                                          int selEnd, std::wstring inserted = {}) {
     notepadxp::editor::PendingChange p;
@@ -798,6 +875,7 @@ int main() {
     TestUndoManager();
     TestDocumentShadow();
     TestCommandLine();
+    TestLanguage();
     std::printf("notepadxp tests: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }
