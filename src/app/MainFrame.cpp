@@ -27,6 +27,9 @@ bool ClipboardHasText() {
            IsClipboardFormatAvailable(CF_TEXT) != FALSE;
 }
 
+constexpr UINT_PTR kFollowTailTimerId = 1;
+constexpr UINT kFollowTailIntervalMs = 500;
+
 } // namespace
 
 MainFrame::MainFrame()
@@ -96,6 +99,9 @@ int MainFrame::OnCreate(LPCREATESTRUCT /*createStruct*/) {
         const file::DocumentState& doc = fileService_.Document();
         editView_.SetLanguageContext(doc.language, doc.indentStyle);
         statusBar_.SetLanguageName(lang::TraitsFor(doc.language).displayName);
+        if (followTail_ && doc.filePath != followedPath_) {
+            StopFollowTail();  // A different document ends the follow.
+        }
         UpdateTitle();
         OnCaretMoved();
     });
@@ -276,6 +282,9 @@ void MainFrame::OnCommand(UINT notifyCode, int id, CWindow /*control*/) {
         case M_STATUSBAR:
             OnToggleStatusBar();
             break;
+        case M_FOLLOWTAIL:
+            OnToggleFollowTail();
+            break;
 
         case M_HELP:
             // TODO: "Help Topics" is deferred — Win11 has no WinHelp/.hlp support.
@@ -323,7 +332,44 @@ void MainFrame::OnDropFiles(HDROP dropInfo) {
 }
 
 void MainFrame::OnDestroy() {
+    StopFollowTail();
     PostQuitMessage(0);
+}
+
+void MainFrame::OnToggleFollowTail() {
+    if (followTail_) {
+        StopFollowTail();
+        return;
+    }
+    if (fileService_.Document().untitled) {
+        return;
+    }
+    // Follow-tail reloads discard local edits, so run the save gate up front;
+    // if the buffer is still dirty afterwards ("don't save"), sync to disk now.
+    if (!fileService_.CanClose()) {
+        return;
+    }
+    if (editView_.IsModified() && !fileService_.Reload()) {
+        return;
+    }
+    followTail_ = true;
+    followedPath_ = fileService_.Document().filePath;
+    SetTimer(kFollowTailTimerId, kFollowTailIntervalMs);
+    editView_.MoveCaretToEnd();
+}
+
+void MainFrame::StopFollowTail() {
+    if (followTail_) {
+        KillTimer(kFollowTailTimerId);
+        followTail_ = false;
+        followedPath_.clear();
+    }
+}
+
+void MainFrame::OnTimer(UINT_PTR id) {
+    if (id == kFollowTailTimerId) {
+        fileService_.FollowTailTick();
+    }
 }
 
 void MainFrame::OnToggleWordWrap() {
@@ -459,6 +505,8 @@ void MainFrame::UpdateMenuState() {
     menu.CheckMenuItem(M_STATUSBAR,
                        MF_BYCOMMAND | (settings_.statusBar ? MF_CHECKED : MF_UNCHECKED));
     enable(M_STATUSBAR, !settings_.wordWrap);
+    menu.CheckMenuItem(M_FOLLOWTAIL, MF_BYCOMMAND | (followTail_ ? MF_CHECKED : MF_UNCHECKED));
+    enable(M_FOLLOWTAIL, !fileService_.Document().untitled);
 }
 
 void MainFrame::SaveWindowPlacement() {

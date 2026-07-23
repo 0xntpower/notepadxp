@@ -52,6 +52,7 @@
 #define M_ZOOMIN                40041
 #define M_ZOOMOUT               40042
 #define M_ZOOMRESET             40043
+#define M_FOLLOWTAIL            40044
 // Help
 #define M_HELP                  40050
 #define M_ABOUT                 40051

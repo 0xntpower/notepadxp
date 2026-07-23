@@ -84,6 +84,10 @@ public:
     /// @brief Move the caret to end of buffer and scroll into view (.LOG stamp).
     void MoveCaretToEnd() override;
 
+    /// @brief Append on-disk content (follow tail): no undo record, modified
+    ///        flag preserved, caret pinned to the end.
+    void AppendExternal(std::wstring_view text) override;
+
     /// @brief Read the current selection as character indices [start, end).
     void GetSelection(int& startOut, int& endOut);
 

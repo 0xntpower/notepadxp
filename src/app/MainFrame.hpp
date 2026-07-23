@@ -38,6 +38,7 @@ public:
         MSG_WM_ACTIVATE(OnActivate)
         MSG_WM_SETFOCUS(OnSetFocus)
         MSG_WM_INITMENUPOPUP(OnInitMenuPopup)
+        MSG_WM_TIMER(OnTimer)
         MSG_WM_COMMAND(OnCommand)
         MSG_WM_DROPFILES(OnDropFiles)
         MESSAGE_HANDLER(WM_QUERYENDSESSION, OnQueryEndSession)
@@ -69,6 +70,9 @@ private:
     // Command handlers with logic of their own.
     void OnToggleWordWrap();
     void OnToggleStatusBar();
+    void OnToggleFollowTail();
+    void StopFollowTail();
+    void OnTimer(UINT_PTR id);
     void OnChooseFont();
     void OnGoTo();
 
@@ -94,6 +98,10 @@ private:
     // View-only zoom multiplier; 100 == the configured font size (the floor).
     // Session-only by design: never persisted, dies with the window.
     int zoomPercent_ = 100;
+
+    // Follow Tail (View menu): the poll timer exists only while enabled.
+    bool followTail_ = false;
+    std::wstring followedPath_;
 };
 
 } // namespace notepadxp::app

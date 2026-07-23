@@ -276,9 +276,14 @@ public:
         text += t;
         modified = true;
     }
+    void AppendExternal(std::wstring_view t) override {
+        text += t;  // Disk content: modified flag untouched.
+        ++externalAppends;
+    }
 
     std::wstring text;
     bool modified = false;
+    int externalAppends = 0;
 };
 
 // Scripted adapter at the FilePrompts seam.
@@ -505,6 +510,63 @@ void TestFileService() {
         CHECK(buffer.text == L"changed on disk");
         svc.PromptReloadIfChanged();
         CHECK(prompts.reloadAsked == 2);  // Re-armed: no repeat prompt.
+
+        DeleteFileW(path.c_str());
+    }
+
+    // Follow tail: growth appends exactly the tail; a rewrite reloads fully.
+    {
+        using notepadxp::file::ReadTailText;
+
+        const std::wstring path = TempFilePath(L"notepadxp_tail.txt");
+        bool lossy = true;
+
+        // ReadTailText round-trips per encoding: the decoded tail equals the
+        // suffix of the text written after the armed size.
+        for (const TextEncoding enc :
+             {TextEncoding::Utf8, TextEncoding::Utf16Le, TextEncoding::Utf16Be,
+              TextEncoding::Ansi}) {
+            const std::wstring head = L"line one\r\n";
+            const std::wstring more = L"line two\r\nline three\r\n";
+            CHECK(WriteAllBytes(path, EncodeText(head, enc, lossy)) == SaveStatus::Ok);
+            notepadxp::file::FileWatcher watcher;
+            watcher.Arm(path);
+            CHECK(WriteAllBytes(path, EncodeText(head + more, enc, lossy)) == SaveStatus::Ok);
+            const auto tail = ReadTailText(path, watcher.ArmedSize(), enc);
+            CHECK(tail.has_value());
+            CHECK(*tail == more);
+        }
+        // Nothing past the offset -> nullopt.
+        CHECK(!ReadTailText(path, 1ull << 40, TextEncoding::Utf8).has_value());
+
+        // FollowTailTick through FileService with a fake buffer.
+        FakeTextBuffer buffer;
+        FakePrompts prompts;
+        DocumentState doc;
+        FileService svc(buffer, doc, prompts);
+        CHECK(WriteAllBytes(path, EncodeText(L"start\r\n", TextEncoding::Utf8, lossy)) ==
+              SaveStatus::Ok);
+        CHECK(svc.OpenPath(path));
+        CHECK(buffer.text == L"start\r\n");
+
+        svc.FollowTailTick();  // Nothing changed: no-op.
+        CHECK(buffer.externalAppends == 0);
+
+        // Growth: only the tail is appended, undo/modified untouched.
+        CHECK(WriteAllBytes(path,
+                            EncodeText(L"start\r\nappended\r\n", TextEncoding::Utf8, lossy)) ==
+              SaveStatus::Ok);
+        svc.FollowTailTick();
+        CHECK(buffer.externalAppends == 1);
+        CHECK(buffer.text == L"start\r\nappended\r\n");
+        CHECK(!buffer.modified);
+
+        // Truncation/rewrite: a full silent reload.
+        CHECK(WriteAllBytes(path, EncodeText(L"rewritten", TextEncoding::Utf8, lossy)) ==
+              SaveStatus::Ok);
+        svc.FollowTailTick();
+        CHECK(buffer.externalAppends == 1);  // No append this time.
+        CHECK(buffer.text == L"rewritten");
 
         DeleteFileW(path.c_str());
     }

@@ -61,6 +61,7 @@ BEGIN
     POPUP "&View"
     BEGIN
         MENUITEM "&Status Bar",             M_STATUSBAR
+        MENUITEM "&Follow Tail",            M_FOLLOWTAIL
     END
     POPUP "&Help"
     BEGIN

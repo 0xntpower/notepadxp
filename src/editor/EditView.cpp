@@ -337,6 +337,19 @@ void EditView::MoveCaretToEnd() {
     edit_.SendMessage(EM_SCROLLCARET);
 }
 
+void EditView::AppendExternal(std::wstring_view text) {
+    const BOOL wasModified = edit_.GetModify();  // Disk content: not a user edit.
+    suppressRecording_ = true;
+    const int end = edit_.GetWindowTextLength();
+    edit_.SetSel(end, end);
+    const std::wstring buffer(text);
+    edit_.ReplaceSel(buffer.c_str(), FALSE);
+    edit_.SetModify(wasModified);
+    edit_.SendMessage(EM_SCROLLCARET);
+    suppressRecording_ = false;
+    shadow_.Append(text);
+}
+
 void EditView::GetSelection(int& startOut, int& endOut) {
     int start = 0;
     int end = 0;

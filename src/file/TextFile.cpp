@@ -71,6 +71,43 @@ SaveStatus WriteAllBytes(const std::wstring& path, const std::vector<std::byte>&
     return SaveStatus::Ok;
 }
 
+std::optional<std::wstring> ReadTailText(const std::wstring& path,
+                                         unsigned long long fromOffset, TextEncoding encoding) {
+    const util::HandleGuard file = OpenForRead(path);
+    if (!file.IsValid()) {
+        return std::nullopt;
+    }
+    LARGE_INTEGER size{};
+    if (GetFileSizeEx(file.Get(), &size) == FALSE ||
+        static_cast<unsigned long long>(size.QuadPart) <= fromOffset) {
+        return std::nullopt;
+    }
+    const unsigned long long tailBytes =
+        static_cast<unsigned long long>(size.QuadPart) - fromOffset;
+    if (tailBytes >= static_cast<unsigned long long>(kMaxFileSize)) {
+        return std::nullopt;
+    }
+    if ((encoding == TextEncoding::Utf16Le || encoding == TextEncoding::Utf16Be) &&
+        tailBytes % 2 != 0) {
+        return std::nullopt;  // Misaligned UTF-16 tail: let the caller reload.
+    }
+    LARGE_INTEGER pos{};
+    pos.QuadPart = static_cast<LONGLONG>(fromOffset);
+    if (SetFilePointerEx(file.Get(), pos, nullptr, FILE_BEGIN) == FALSE) {
+        return std::nullopt;
+    }
+    std::vector<std::byte> bytes(static_cast<size_t>(tailBytes));
+    DWORD read = 0;
+    if (ReadFile(file.Get(), bytes.data(), static_cast<DWORD>(bytes.size()), &read, nullptr) ==
+            FALSE ||
+        read != bytes.size()) {
+        return std::nullopt;
+    }
+    // DecodeText would strip a leading BOM; a growing log's tail never starts
+    // with one, and a rewritten file reports Replaced (full reload) instead.
+    return DecodeText(bytes.data(), bytes.size(), encoding);
+}
+
 std::optional<TextEncoding> SniffEncoding(const std::wstring& path) {
     const util::HandleGuard file = OpenForRead(path);
     if (!file.IsValid()) {

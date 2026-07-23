@@ -46,4 +46,12 @@ enum class SaveStatus { Ok, CreateError, WriteError };
 ///        whole buffer. @return nullopt when the file cannot be read.
 [[nodiscard]] std::optional<TextEncoding> SniffEncoding(const std::wstring& path);
 
+/// @brief Read and decode @p path from byte offset @p fromOffset to the end
+///        (the follow-tail append). @return nullopt when the file cannot be
+///        read, nothing lies past the offset, or a UTF-16 tail is not aligned
+///        to whole code units — callers then fall back to a full reload.
+[[nodiscard]] std::optional<std::wstring> ReadTailText(const std::wstring& path,
+                                                       unsigned long long fromOffset,
+                                                       TextEncoding encoding);
+
 } // namespace notepadxp::file

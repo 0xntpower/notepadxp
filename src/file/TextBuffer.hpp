@@ -31,6 +31,10 @@ public:
 
     /// @brief Replace the current selection with @p text.
     virtual void InsertText(std::wstring_view text) = 0;
+
+    /// @brief Append external (on-disk) content at the end without touching
+    ///        undo or the modified flag; caret follows the end (follow tail).
+    virtual void AppendExternal(std::wstring_view text) = 0;
 };
 
 } // namespace notepadxp::file

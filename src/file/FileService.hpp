@@ -72,6 +72,11 @@ public:
     ///        discarding the buffer. No save gate — callers decide first.
     bool Reload();
 
+    /// @brief One follow-tail poll: pure growth appends just the tail (undo
+    ///        untouched); anything else reloads silently with the caret at
+    ///        the end. No-op when nothing is armed or nothing changed.
+    void FollowTailTick();
+
     [[nodiscard]] const DocumentState& Document() const noexcept {
         return document_;
     }

@@ -117,6 +117,28 @@ bool FileService::Reload() {
     return LoadFromPath(document_.filePath, std::nullopt);
 }
 
+void FileService::FollowTailTick() {
+    if (document_.untitled || !watcher_.IsArmed()) {
+        return;
+    }
+    const FileWatcher::Verdict verdict = watcher_.Check();
+    if (verdict == FileWatcher::Verdict::Unchanged) {
+        return;
+    }
+    if (verdict == FileWatcher::Verdict::Grown) {
+        if (const auto tail =
+                ReadTailText(document_.filePath, watcher_.ArmedSize(), document_.encoding)) {
+            buffer_.AppendExternal(*tail);
+            watcher_.Rearm();
+            return;
+        }
+    }
+    // Replaced (or an unreadable tail): full silent reload, pinned to the end.
+    if (Reload()) {
+        buffer_.MoveCaretToEnd();
+    }
+}
+
 bool FileService::CheckSave() {
     // No prompt for an untitled, empty buffer, or an unmodified document.
     if (document_.untitled && buffer_.TextLength() == 0) {
