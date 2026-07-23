@@ -45,6 +45,7 @@ BEGIN
         MENUITEM "&Replace...\tCtrl+H",     M_REPLACE
         MENUITEM "&Go To...\tCtrl+G",       M_GOTO
         MENUITEM "Go to &Matching Brace\tCtrl+]", M_MATCHBRACE
+        MENUITEM "Togg&le Comment\tCtrl+/", M_TOGGLECOMMENT
         MENUITEM SEPARATOR
         MENUITEM "Select &All\tCtrl+A",     M_SELECTALL
         MENUITEM "Time/&Date\tF5",          M_DATETIME
@@ -90,6 +91,7 @@ BEGIN
     "V",        M_PASTE,        VIRTKEY, CONTROL
     "A",        M_SELECTALL,    VIRTKEY, CONTROL
     VK_OEM_6,     M_MATCHBRACE, VIRTKEY, CONTROL
+    VK_OEM_2,     M_TOGGLECOMMENT, VIRTKEY, CONTROL
     VK_OEM_PLUS,  M_ZOOMIN,     VIRTKEY, CONTROL
     VK_ADD,       M_ZOOMIN,     VIRTKEY, CONTROL
     VK_OEM_MINUS, M_ZOOMOUT,    VIRTKEY, CONTROL

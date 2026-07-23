@@ -350,6 +350,20 @@ void EditView::SelectRange(int start, int end) {
     edit_.SendMessage(EM_SCROLLCARET);
 }
 
+void EditView::ExpandSelectionToLines(int& startCharOut, int& endCharOut) {
+    int selStart = 0;
+    int selEnd = 0;
+    edit_.GetSel(selStart, selEnd);
+    const int firstLine = edit_.LineFromChar(selStart);
+    startCharOut = edit_.LineIndex(firstLine);
+    int lastLine = edit_.LineFromChar(selEnd);
+    if (selEnd > selStart && edit_.LineIndex(lastLine) == selEnd) {
+        --lastLine;  // Selection ends at a line start: that line is not included.
+    }
+    const int lastLineStart = edit_.LineIndex(lastLine);
+    endCharOut = lastLineStart + edit_.LineLength(lastLineStart);
+}
+
 bool EditView::CanUndo() {
     return undo_.CanUndo();
 }

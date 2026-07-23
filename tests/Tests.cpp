@@ -21,6 +21,7 @@
 #include "file/FileService.cpp"
 #include "file/TextFile.cpp"
 #include "lang/BraceMatch.cpp"
+#include "lang/CommentToggle.cpp"
 #include "lang/IndentEngine.cpp"
 #include "lang/Language.cpp"
 #include "printing/HeaderFooter.cpp"
@@ -797,6 +798,45 @@ void TestBraceMatch() {
     CHECK(!FindMatchingBrace(L"close }", 6, cpp).has_value());
 }
 
+void TestCommentToggle() {
+    using notepadxp::lang::Language;
+    using notepadxp::lang::ToggleLineComments;
+    using notepadxp::lang::TraitsFor;
+    const auto& cpp = TraitsFor(Language::Cpp);
+    const auto& python = TraitsFor(Language::Python);
+    const auto& asm_ = TraitsFor(Language::Asm);
+    const auto& windbg = TraitsFor(Language::WinDbg);
+    const auto& batch = TraitsFor(Language::Batch);
+    const auto& json = TraitsFor(Language::Json);
+
+    // Round trips per language.
+    CHECK(ToggleLineComments(L"int x;", cpp) == L"// int x;");
+    CHECK(ToggleLineComments(L"// int x;", cpp) == L"int x;");
+    CHECK(ToggleLineComments(L"a()", python) == L"# a()");
+    CHECK(ToggleLineComments(L"# a()", python) == L"a()");
+    CHECK(ToggleLineComments(L"mov eax, 1", asm_) == L"; mov eax, 1");
+    CHECK(ToggleLineComments(L"bp nt!Foo", windbg) == L"$$ bp nt!Foo");
+    CHECK(ToggleLineComments(L"$$ bp nt!Foo", windbg) == L"bp nt!Foo");
+    CHECK(ToggleLineComments(L"echo hi", batch) == L"REM echo hi");
+    CHECK(ToggleLineComments(L"REM echo hi", batch) == L"echo hi");
+    CHECK(ToggleLineComments(L":: echo hi", batch) == L"echo hi");   // Alt form stripped.
+    CHECK(ToggleLineComments(L"rem echo hi", batch) == L"echo hi");  // Case-insensitive.
+    // JSON has no line comment: unchanged.
+    CHECK(ToggleLineComments(L"{\"a\": 1}", json) == L"{\"a\": 1}");
+
+    // Multi-line block at the common minimum indent; blank lines untouched.
+    CHECK(ToggleLineComments(L"    a();\r\n\r\n        b();\r\n", cpp) ==
+          L"    // a();\r\n\r\n    //     b();\r\n");
+    CHECK(ToggleLineComments(L"    // a();\r\n\r\n    // b();\r\n", cpp) ==
+          L"    a();\r\n\r\n    b();\r\n");
+
+    // Mixed commented/uncommented lines: comment everything.
+    CHECK(ToggleLineComments(L"// a\r\nb\r\n", cpp) == L"// // a\r\n// b\r\n");
+
+    // "REM" only counts at a word boundary.
+    CHECK(ToggleLineComments(L"remark this", batch) == L"REM remark this");
+}
+
 notepadxp::editor::PendingChange Pending(notepadxp::editor::PendingChange::Kind kind, int selStart,
                                          int selEnd, std::wstring inserted = {}) {
     notepadxp::editor::PendingChange p;
@@ -985,6 +1025,7 @@ int main() {
     TestLanguage();
     TestIndentEngine();
     TestBraceMatch();
+    TestCommentToggle();
     std::printf("notepadxp tests: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

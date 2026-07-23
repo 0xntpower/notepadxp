@@ -11,6 +11,7 @@
 #include "dialogs/GoToDialog.hpp"
 #include "file/Encoding.hpp"
 #include "lang/BraceMatch.hpp"
+#include "lang/CommentToggle.hpp"
 #include "lang/Language.hpp"
 #include "util/DateTime.hpp"
 #include "util/PathName.hpp"
@@ -196,6 +197,25 @@ void MainFrame::OnCommand(UINT notifyCode, int id, CWindow /*control*/) {
                 editView_.SelectRange(static_cast<int>(*match), static_cast<int>(*match) + 1);
             } else {
                 MessageBeep(MB_ICONEXCLAMATION);
+            }
+            break;
+        }
+        case M_TOGGLECOMMENT: {
+            const auto& traits = lang::TraitsFor(fileService_.Document().language);
+            if (traits.lineComment.empty()) {
+                break;
+            }
+            int startChar = 0;
+            int endChar = 0;
+            editView_.ExpandSelectionToLines(startChar, endChar);
+            const std::wstring text = editView_.GetText();
+            const std::wstring block = text.substr(
+                static_cast<size_t>(startChar), static_cast<size_t>(endChar - startChar));
+            const std::wstring toggled = lang::ToggleLineComments(block, traits);
+            if (toggled != block) {
+                editView_.SelectRange(startChar, endChar);
+                editView_.InsertText(toggled);
+                editView_.SelectRange(startChar, startChar + static_cast<int>(toggled.size()));
             }
             break;
         }
@@ -394,6 +414,8 @@ void MainFrame::UpdateMenuState() {
     enable(M_FINDNEXT, hasText);
     enable(M_REPLACE, hasText);
     enable(M_MATCHBRACE, hasText);
+    enable(M_TOGGLECOMMENT,
+           !lang::TraitsFor(fileService_.Document().language).lineComment.empty());
 
     enable(M_GOTO, !settings_.wordWrap);
 

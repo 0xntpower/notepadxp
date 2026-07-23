@@ -40,6 +40,7 @@
 #define M_SELECTALL             40019
 #define M_DATETIME              40020
 #define M_MATCHBRACE            40021
+#define M_TOGGLECOMMENT         40022
 // Format
 #define M_WORDWRAP              40030
 #define M_SETFONT               40031

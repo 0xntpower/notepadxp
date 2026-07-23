@@ -90,6 +90,11 @@ public:
     /// @brief Select [start, end) and scroll the caret into view.
     void SelectRange(int start, int end);
 
+    /// @brief Whole-line bounds of the current selection: start of its first
+    ///        line to end of its last line (excluding the trailing break). A
+    ///        selection ending exactly at a line start does not pull that line in.
+    void ExpandSelectionToLines(int& startCharOut, int& endCharOut);
+
     // State queries used to drive menu enable/check state and the status bar.
     // These are not const because the underlying WTL/CEdit accessors send window
     // messages and are not const-qualified.
