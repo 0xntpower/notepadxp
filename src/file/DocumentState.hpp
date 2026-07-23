@@ -6,6 +6,7 @@
 #include <string>
 
 #include "file/Encoding.hpp"
+#include "file/LineEndings.hpp"
 #include "lang/Language.hpp"
 
 namespace notepadxp::file {
@@ -17,6 +18,7 @@ struct DocumentState {
     std::wstring filePath;  // Full path; empty while untitled.
     bool untitled = true;
     TextEncoding encoding = TextEncoding::Ansi;  // Encoding to save with.
+    LineEnding lineEnding = LineEnding::Crlf;     // Newline style to save with.
     lang::Language language = lang::Language::PlainText;
     lang::IndentStyle indentStyle{};
 };

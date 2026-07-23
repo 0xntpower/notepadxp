@@ -8,6 +8,7 @@
 
 #include "Resource.h"
 #include "dialogs/EncodingFileDialog.hpp"
+#include "file/LineEndings.hpp"
 #include "file/TextFile.hpp"
 #include "util/DateTime.hpp"
 #include "util/PathName.hpp"
@@ -44,6 +45,7 @@ bool FileService::New() {
     document_.encoding = TextEncoding::Ansi;
     document_.language = lang::Language::PlainText;
     document_.indentStyle = {};
+    document_.lineEnding = LineEnding::Crlf;  // Windows convention for new files.
     watcher_.Disarm();
     NotifyDocumentChanged();
     return true;
@@ -128,7 +130,7 @@ void FileService::FollowTailTick() {
     if (verdict == FileWatcher::Verdict::Grown) {
         if (const auto tail =
                 ReadTailText(document_.filePath, watcher_.ArmedSize(), document_.encoding)) {
-            buffer_.AppendExternal(*tail);
+            buffer_.AppendExternal(NormalizeToCrlf(*tail));  // Match the control's CRLF.
             watcher_.Rearm();
             return;
         }
@@ -171,6 +173,7 @@ bool FileService::LoadFromPath(const std::wstring& path, std::optional<TextEncod
                 document_.filePath = path;
                 document_.untitled = false;
                 document_.encoding = TextEncoding::Ansi;
+                document_.lineEnding = LineEnding::Crlf;
                 DetectDocumentLanguage(std::wstring());  // Extension decides.
                 watcher_.Disarm();  // Nothing on disk yet; the first save arms.
                 NotifyDocumentChanged();
@@ -187,7 +190,11 @@ bool FileService::LoadFromPath(const std::wstring& path, std::optional<TextEncod
             break;
     }
 
-    buffer_.SetText(loaded.text);
+    // Detect the file's newline style, then normalize to CRLF so the Edit
+    // control renders LF-only (Unix) and CR-only files with real line breaks;
+    // the original style is restored on save.
+    document_.lineEnding = DetectLineEnding(loaded.text);
+    buffer_.SetText(NormalizeToCrlf(loaded.text));
     document_.filePath = path;
     document_.untitled = false;
     document_.encoding = loaded.encoding;
@@ -204,7 +211,8 @@ bool FileService::LoadFromPath(const std::wstring& path, std::optional<TextEncod
 }
 
 bool FileService::SaveToPath(const std::wstring& path, TextEncoding encoding) {
-    const std::wstring text = buffer_.GetText();
+    // Restore the file's original newline convention (the control holds CRLF).
+    const std::wstring text = ConvertFromCrlf(buffer_.GetText(), document_.lineEnding);
     bool lossy = false;
     const std::vector<std::byte> bytes = EncodeText(text, encoding, lossy);
     if (lossy && !prompts_.AskContinueLossySave(util::PathLeaf(path))) {

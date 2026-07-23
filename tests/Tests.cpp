@@ -20,6 +20,7 @@
 #include "file/Encoding.cpp"
 #include "file/FileService.cpp"
 #include "file/FileWatcher.cpp"
+#include "file/LineEndings.cpp"
 #include "file/TextFile.cpp"
 #include "lang/BraceMatch.cpp"
 #include "lang/CommentToggle.cpp"
@@ -451,6 +452,30 @@ void TestFileService() {
         CHECK(doc.language == notepadxp::lang::Language::PlainText);
     }
 
+    // LF-only files load with CRLF in the control and save LF back to disk.
+    {
+        FakeTextBuffer buffer;
+        FakePrompts prompts;
+        DocumentState doc;
+        FileService svc(buffer, doc, prompts);
+        bool lossy = true;
+
+        const std::wstring path = TempFilePath(L"notepadxp_eol.py");
+        const std::wstring unix = L"import time\nimport sys\n\ndef main():\n    pass\n";
+        CHECK(WriteAllBytes(path, EncodeText(unix, TextEncoding::Utf8, lossy)) == SaveStatus::Ok);
+
+        CHECK(svc.OpenPath(path));
+        CHECK(doc.lineEnding == notepadxp::file::LineEnding::Lf);
+        CHECK(buffer.text == L"import time\r\nimport sys\r\n\r\ndef main():\r\n    pass\r\n");
+
+        buffer.modified = true;
+        CHECK(svc.Save());
+        const auto reloaded = LoadTextFile(path, std::nullopt);
+        CHECK(reloaded.status == LoadStatus::Ok);
+        CHECK(reloaded.text == unix);  // Original LF bytes preserved on disk.
+        DeleteFileW(path.c_str());
+    }
+
     // Disk-change detection: FileWatcher verdicts and the reload prompt flow.
     {
         const std::wstring path = TempFilePath(L"notepadxp_watch.txt");
@@ -779,6 +804,38 @@ void TestUndoManager() {
         }
         CHECK(undone == 100);
     }
+}
+
+void TestLineEndings() {
+    using notepadxp::file::ConvertFromCrlf;
+    using notepadxp::file::DetectLineEnding;
+    using notepadxp::file::LineEnding;
+    using notepadxp::file::NormalizeToCrlf;
+
+    // Detection: dominant style wins; ties and no-newline default to CRLF.
+    CHECK(DetectLineEnding(L"a\nb\nc\n") == LineEnding::Lf);
+    CHECK(DetectLineEnding(L"a\r\nb\r\n") == LineEnding::Crlf);
+    CHECK(DetectLineEnding(L"a\rb\rc\r") == LineEnding::Cr);
+    CHECK(DetectLineEnding(L"one line, no newline") == LineEnding::Crlf);
+    CHECK(DetectLineEnding(L"") == LineEnding::Crlf);
+    CHECK(DetectLineEnding(L"a\r\nb\nc\n") == LineEnding::Lf);  // 2 LF vs 1 CRLF.
+
+    // Normalize every convention (and mixtures) to CRLF for the control.
+    CHECK(NormalizeToCrlf(L"a\nb\nc") == L"a\r\nb\r\nc");
+    CHECK(NormalizeToCrlf(L"a\rb\rc") == L"a\r\nb\r\nc");
+    CHECK(NormalizeToCrlf(L"a\r\nb\r\nc") == L"a\r\nb\r\nc");
+    CHECK(NormalizeToCrlf(L"mixed\r\nlf\ncr\rend") == L"mixed\r\nlf\r\ncr\r\nend");
+    // A backslash-n escape inside a string is two characters, not a newline.
+    CHECK(NormalizeToCrlf(L"{\"x\": \"a\\nb\"}") == L"{\"x\": \"a\\nb\"}");
+
+    // Convert the control's CRLF back to the file's convention on save.
+    CHECK(ConvertFromCrlf(L"a\r\nb\r\nc", LineEnding::Lf) == L"a\nb\nc");
+    CHECK(ConvertFromCrlf(L"a\r\nb\r\nc", LineEnding::Cr) == L"a\rb\rc");
+    CHECK(ConvertFromCrlf(L"a\r\nb\r\nc", LineEnding::Crlf) == L"a\r\nb\r\nc");
+
+    // Round trip: load-normalize then save-restore reproduces the original bytes.
+    const std::wstring unix = L"import time\nimport sys\n\ndef main():\n    pass\n";
+    CHECK(ConvertFromCrlf(NormalizeToCrlf(unix), DetectLineEnding(unix)) == unix);
 }
 
 void TestLanguage() {
@@ -1237,6 +1294,7 @@ int main() {
     TestUndoManager();
     TestDocumentShadow();
     TestCommandLine();
+    TestLineEndings();
     TestLanguage();
     TestIndentEngine();
     TestBraceMatch();
