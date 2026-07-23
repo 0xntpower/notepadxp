@@ -7,18 +7,14 @@
 
 #include "Resource.h"
 #include "dialogs/EncodingFileDialog.hpp"
+#include "file/TextFile.hpp"
 #include "util/DateTime.hpp"
-#include "util/FileMapping.hpp"
-#include "util/HandleGuard.hpp"
 #include "util/PathName.hpp"
 #include "util/StringTable.hpp"
 
 namespace notepadxp::file {
 
 namespace {
-
-// Notepad refuses files at/above 1 GiB, matching classic Notepad.
-constexpr long long kMaxFileSize = 0x40000000LL;
 
 // True when the document begins with the classic ".LOG" auto-timestamp marker.
 bool StartsWithLogTag(const std::wstring& text) {
@@ -42,7 +38,7 @@ bool FileService::Open() {
     if (!CheckSave()) {
         return false;
     }
-    const std::optional<dialogs::FileDialogResult> result =
+    const std::optional<dialogs::OpenDialogResult> result =
         dialogs::EncodingFileDialog::ShowOpen(owner_);
     if (!result.has_value()) {
         return false;
@@ -59,7 +55,7 @@ bool FileService::Save() {
 
 bool FileService::SaveAs() {
     const std::wstring defaultPath = document_.untitled ? std::wstring{} : document_.filePath;
-    const std::optional<dialogs::FileDialogResult> result =
+    const std::optional<dialogs::SaveDialogResult> result =
         dialogs::EncodingFileDialog::ShowSave(owner_, defaultPath, document_.encoding);
     if (!result.has_value()) {
         return false;
@@ -108,12 +104,9 @@ bool FileService::CheckSave() {
 }
 
 bool FileService::LoadFromPath(const std::wstring& path, std::optional<TextEncoding> forced) {
-    util::HandleGuard file(CreateFileW(path.c_str(), GENERIC_READ,
-                                       FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
-                                       FILE_ATTRIBUTE_NORMAL, nullptr));
-    if (!file.IsValid()) {
-        const DWORD error = GetLastError();
-        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
+    const TextFileLoadResult loaded = LoadTextFile(path, forced);
+    switch (loaded.status) {
+        case LoadStatus::NotFound: {
             // Offer to create a new file with this name (the file-not-found prompt).
             const std::wstring message = util::LoadAndMerge(IDS_FNF, util::PathLeaf(path));
             if (util::AlertBox(owner_, util::LoadStr(IDS_NN), message,
@@ -126,38 +119,27 @@ bool FileService::LoadFromPath(const std::wstring& path, std::optional<TextEncod
             }
             return false;
         }
-        util::AlertBox(owner_, util::LoadStr(IDS_NN),
-                       util::LoadAndMerge(IDS_DISKERROR, util::PathLeaf(path)),
-                       MB_OK | MB_ICONEXCLAMATION);
-        return false;
+        case LoadStatus::TooLarge:
+            util::AlertBox(owner_, util::LoadStr(IDS_NN),
+                           util::LoadAndMerge(IDS_FTL, util::PathLeaf(path)),
+                           MB_OK | MB_ICONEXCLAMATION);
+            return false;
+        case LoadStatus::AccessError:
+            util::AlertBox(owner_, util::LoadStr(IDS_NN),
+                           util::LoadAndMerge(IDS_DISKERROR, util::PathLeaf(path)),
+                           MB_OK | MB_ICONEXCLAMATION);
+            return false;
+        case LoadStatus::Ok:
+            break;
     }
 
-    LARGE_INTEGER size{};
-    if (GetFileSizeEx(file.Get(), &size) &&
-        (size.QuadPart >= kMaxFileSize || size.HighPart != 0)) {
-        util::AlertBox(owner_, util::LoadStr(IDS_NN),
-                       util::LoadAndMerge(IDS_FTL, util::PathLeaf(path)),
-                       MB_OK | MB_ICONEXCLAMATION);
-        return false;
-    }
-
-    util::ReadOnlyFileMapping mapping(file.Get());
-    std::wstring text;
-    TextEncoding encoding = forced.value_or(TextEncoding::Ansi);
-    if (mapping.IsValid()) {
-        const std::byte* data = mapping.Data();
-        const size_t bytes = mapping.Size();
-        encoding = forced.value_or(DetectEncoding(data, bytes));
-        text = DecodeText(data, bytes, encoding);
-    }
-
-    editView_.SetText(text);
+    editView_.SetText(loaded.text);
     document_.filePath = path;
     document_.untitled = false;
-    document_.encoding = encoding;
+    document_.encoding = loaded.encoding;
 
     // ".LOG" files get a timestamp appended at end-of-file on open.
-    if (StartsWithLogTag(text)) {
+    if (StartsWithLogTag(loaded.text)) {
         editView_.MoveCaretToEnd();
         editView_.InsertText(util::FormatTimestamp(true));
     }
@@ -176,25 +158,19 @@ bool FileService::SaveToPath(const std::wstring& path, TextEncoding encoding) {
         }
     }
 
-    util::HandleGuard file(CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
-                                       FILE_ATTRIBUTE_NORMAL, nullptr));
-    if (!file.IsValid()) {
-        util::AlertBox(owner_, util::LoadStr(IDS_NN),
-                       util::LoadAndMerge(IDS_CREATEERR, util::PathLeaf(path)),
-                       MB_OK | MB_ICONEXCLAMATION);
-        return false;
-    }
-
-    if (!bytes.empty()) {
-        DWORD written = 0;
-        const BOOL ok =
-            WriteFile(file.Get(), bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr);
-        if (ok == FALSE || written != bytes.size()) {
+    switch (WriteAllBytes(path, bytes)) {
+        case SaveStatus::CreateError:
+            util::AlertBox(owner_, util::LoadStr(IDS_NN),
+                           util::LoadAndMerge(IDS_CREATEERR, util::PathLeaf(path)),
+                           MB_OK | MB_ICONEXCLAMATION);
+            return false;
+        case SaveStatus::WriteError:
             util::AlertBox(owner_, util::LoadStr(IDS_NN),
                            util::LoadAndMerge(IDS_DISKERROR, util::PathLeaf(path)),
                            MB_OK | MB_ICONEXCLAMATION);
             return false;
-        }
+        case SaveStatus::Ok:
+            break;
     }
 
     editView_.SetModified(false);

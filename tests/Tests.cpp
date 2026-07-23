@@ -6,14 +6,18 @@
 // so there is no separate library to link). Run: builds to tests/build, exit
 // code 0 means all checks passed.
 
+#include <array>
 #include <cstddef>
 #include <cstdio>
 #include <initializer_list>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "file/Encoding.cpp"
+#include "file/TextFile.cpp"
 #include "printing/HeaderFooter.cpp"
+#include "util/FileMapping.cpp"
 #include "util/PathName.hpp"
 #include "util/StringTable.cpp"  // Provides util::LoadStr referenced by HeaderFooter.
 
@@ -143,12 +147,86 @@ void TestPathName() {
     CHECK(PathLeaf(L"") == L"");
 }
 
+std::wstring TempFilePath(const wchar_t* name) {
+    std::array<wchar_t, MAX_PATH> dir{};
+    GetTempPathW(static_cast<DWORD>(dir.size()), dir.data());
+    return std::wstring(dir.data()) + name;
+}
+
+void TestTextFile() {
+    using notepadxp::file::EncodeText;
+    using notepadxp::file::LoadStatus;
+    using notepadxp::file::LoadTextFile;
+    using notepadxp::file::SaveStatus;
+    using notepadxp::file::SniffEncoding;
+    using notepadxp::file::TextEncoding;
+    using notepadxp::file::WriteAllBytes;
+
+    const std::wstring path = TempFilePath(L"notepadxp_textfile_test.txt");
+
+    // Round trip through each Unicode encoding: write, load with auto-detect.
+    for (const TextEncoding enc :
+         {TextEncoding::Utf8, TextEncoding::Utf16Le, TextEncoding::Utf16Be}) {
+        bool lossy = true;
+        const std::wstring src = L"Héllo\r\nWörld";
+        CHECK(WriteAllBytes(path, EncodeText(src, enc, lossy)) == SaveStatus::Ok);
+        const auto loaded = LoadTextFile(path, std::nullopt);
+        CHECK(loaded.status == LoadStatus::Ok);
+        CHECK(loaded.encoding == enc);
+        CHECK(loaded.text == src);
+    }
+
+    // Plain ASCII detects as ANSI, and the sniff preview agrees with the load.
+    {
+        bool lossy = true;
+        CHECK(WriteAllBytes(path, EncodeText(L"plain ascii", TextEncoding::Ansi, lossy)) ==
+              SaveStatus::Ok);
+        const auto loaded = LoadTextFile(path, std::nullopt);
+        CHECK(loaded.status == LoadStatus::Ok);
+        CHECK(loaded.encoding == TextEncoding::Ansi);
+        CHECK(loaded.text == L"plain ascii");
+        CHECK(SniffEncoding(path) == std::optional(TextEncoding::Ansi));
+    }
+
+    // A forced encoding overrides detection.
+    {
+        const auto loaded = LoadTextFile(path, TextEncoding::Utf16Le);
+        CHECK(loaded.status == LoadStatus::Ok);
+        CHECK(loaded.encoding == TextEncoding::Utf16Le);
+    }
+
+    // The sniff preview reports a BOM'd file correctly.
+    {
+        bool lossy = true;
+        CHECK(WriteAllBytes(path, EncodeText(L"bom", TextEncoding::Utf8, lossy)) == SaveStatus::Ok);
+        CHECK(SniffEncoding(path) == std::optional(TextEncoding::Utf8));
+    }
+
+    // An empty file loads as empty ANSI text.
+    {
+        CHECK(WriteAllBytes(path, {}) == SaveStatus::Ok);
+        const auto loaded = LoadTextFile(path, std::nullopt);
+        CHECK(loaded.status == LoadStatus::Ok);
+        CHECK(loaded.text.empty());
+        CHECK(loaded.encoding == TextEncoding::Ansi);
+    }
+
+    DeleteFileW(path.c_str());
+
+    // Missing files and paths report NotFound; the sniff reports nothing.
+    CHECK(LoadTextFile(path, std::nullopt).status == LoadStatus::NotFound);
+    CHECK(LoadTextFile(TempFilePath(L"notepadxp_no_such_dir\\x.txt"), std::nullopt).status ==
+          LoadStatus::NotFound);
+    CHECK(SniffEncoding(path) == std::nullopt);
+}
+
 } // namespace
 
 int main() {
     TestEncoding();
     TestHeaderFooter();
     TestPathName();
+    TestTextFile();
     std::printf("notepadxp tests: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

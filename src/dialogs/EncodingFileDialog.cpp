@@ -11,20 +11,20 @@
 
 #include "Resource.h"
 #include "file/Encoding.hpp"
-#include "util/HandleGuard.hpp"
+#include "file/TextFile.hpp"
 #include "util/StringTable.hpp"
 
 namespace notepadxp::dialogs {
 
 namespace {
 
-constexpr size_t kSniffBytes = 1024;  // Bytes sampled from the file head to sniff the encoding.
 constexpr size_t kFileBufferChars = 2048;
 
 // Shared between ShowOpen/ShowSave and the hook via OPENFILENAME::lCustData.
 struct DialogState {
     file::TextEncoding encoding = file::TextEncoding::Ansi;
     bool isSave = false;
+    bool userOverrode = false;  // True once the user picked in the combo themselves.
 };
 
 DialogState* StateOf(HWND dialog) {
@@ -51,22 +51,6 @@ void AddEncodingName(HWND combo, UINT stringId) {
     SendMessageW(combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(name.c_str()));
 }
 
-// Read the head of a file and detect its encoding for the Open preview.
-std::optional<file::TextEncoding> DetectFileEncoding(const wchar_t* path) {
-    util::HandleGuard file(CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                                       nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
-    if (!file.IsValid()) {
-        return std::nullopt;
-    }
-    std::array<std::byte, kSniffBytes> buffer{};
-    DWORD read = 0;
-    if (ReadFile(file.Get(), buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr) ==
-        FALSE) {
-        return std::nullopt;
-    }
-    return file::DetectEncoding(buffer.data(), read);
-}
-
 UINT_PTR CALLBACK EncodingHookProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
         case WM_INITDIALOG: {
@@ -83,12 +67,15 @@ UINT_PTR CALLBACK EncodingHookProc(HWND dialog, UINT message, WPARAM wParam, LPA
             return TRUE;
         }
         case WM_COMMAND:
+            // CBN_SELCHANGE fires only for user interaction (CB_SETCURSEL from
+            // the preview below does not notify), so this marks a real override.
             if (LOWORD(wParam) == IDC_FILETYPE && HIWORD(wParam) == CBN_SELCHANGE) {
                 if (DialogState* state = StateOf(dialog)) {
                     const auto sel = static_cast<int>(
                         SendMessageW(GetDlgItem(dialog, IDC_FILETYPE), CB_GETCURSEL, 0, 0));
                     if (sel >= 0) {
                         state->encoding = static_cast<file::TextEncoding>(sel);
+                        state->userOverrode = true;
                     }
                 }
             }
@@ -105,8 +92,9 @@ UINT_PTR CALLBACK EncodingHookProc(HWND dialog, UINT message, WPARAM wParam, LPA
                 if (CommDlg_OpenSave_GetFilePath(parentDialog, path.data(),
                                                  static_cast<int>(path.size())) > 0) {
                     if (const std::optional<file::TextEncoding> enc =
-                            DetectFileEncoding(path.data())) {
+                            file::SniffEncoding(path.data())) {
                         state->encoding = enc.value();
+                        state->userOverrode = false;  // New file: back to auto-detect.
                         SendMessageW(GetDlgItem(dialog, IDC_FILETYPE), CB_SETCURSEL,
                                      static_cast<WPARAM>(enc.value()), 0);
                     }
@@ -127,8 +115,8 @@ UINT_PTR CALLBACK EncodingHookProc(HWND dialog, UINT message, WPARAM wParam, LPA
 
 } // namespace
 
-std::optional<FileDialogResult> EncodingFileDialog::ShowOpen(HWND parent) {
-    DialogState state{file::TextEncoding::Ansi, false};
+std::optional<OpenDialogResult> EncodingFileDialog::ShowOpen(HWND parent) {
+    DialogState state{file::TextEncoding::Ansi, false, false};
     std::array<wchar_t, kFileBufferChars> fileBuffer{};
     const std::wstring filter = BuildFilter();
 
@@ -150,13 +138,16 @@ std::optional<FileDialogResult> EncodingFileDialog::ShowOpen(HWND parent) {
     if (GetOpenFileNameW(&ofn) == FALSE) {
         return std::nullopt;
     }
-    return FileDialogResult{std::wstring(fileBuffer.data()), state.encoding};
+    return OpenDialogResult{std::wstring(fileBuffer.data()),
+                            state.userOverrode
+                                ? std::optional<file::TextEncoding>(state.encoding)
+                                : std::nullopt};
 }
 
-std::optional<FileDialogResult> EncodingFileDialog::ShowSave(HWND parent,
-                                                            const std::wstring& defaultPath,
-                                                            file::TextEncoding currentEncoding) {
-    DialogState state{currentEncoding, true};
+std::optional<SaveDialogResult> EncodingFileDialog::ShowSave(HWND parent,
+                                                             const std::wstring& defaultPath,
+                                                             file::TextEncoding currentEncoding) {
+    DialogState state{currentEncoding, true, false};
     std::array<wchar_t, kFileBufferChars> fileBuffer{};
     if (!defaultPath.empty()) {
         wcsncpy_s(fileBuffer.data(), fileBuffer.size(), defaultPath.c_str(), _TRUNCATE);
@@ -181,7 +172,7 @@ std::optional<FileDialogResult> EncodingFileDialog::ShowSave(HWND parent,
     if (GetSaveFileNameW(&ofn) == FALSE) {
         return std::nullopt;
     }
-    return FileDialogResult{std::wstring(fileBuffer.data()), state.encoding};
+    return SaveDialogResult{std::wstring(fileBuffer.data()), state.encoding};
 }
 
 } // namespace notepadxp::dialogs
