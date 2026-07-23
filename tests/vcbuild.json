@@ -22,7 +22,7 @@
 
   "linker": {
     "subsystem": "console",
-    "libraries": ["user32.lib", "advapi32.lib"]
+    "libraries": ["user32.lib", "advapi32.lib", "shell32.lib"]
   },
 
   "sources": {

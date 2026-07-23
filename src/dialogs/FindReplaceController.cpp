@@ -1,56 +1,12 @@
 #include "dialogs/FindReplaceController.hpp"
 
 #include <string>
-#include <string_view>
 
 #include "Resource.h"
+#include "editor/SearchEngine.hpp"
 #include "util/StringTable.hpp"
 
 namespace notepadxp::dialogs {
-
-namespace {
-
-// Compare key against text at [pos, pos+key.size()), honoring case sensitivity.
-bool MatchAt(const std::wstring& text, size_t pos, std::wstring_view key, bool matchCase) {
-    if (pos + key.size() > text.size()) {
-        return false;
-    }
-    if (matchCase) {
-        return wcsncmp(text.c_str() + pos, key.data(), key.size()) == 0;
-    }
-    // Locale-aware, case-insensitive comparison.
-    return CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE, text.c_str() + pos,
-                          static_cast<int>(key.size()), key.data(),
-                          static_cast<int>(key.size())) == CSTR_EQUAL;
-}
-
-// First match at or after `from`; npos if none. No wrap-around.
-size_t FindForward(const std::wstring& text, std::wstring_view key, size_t from, bool matchCase) {
-    if (key.empty() || key.size() > text.size()) {
-        return std::wstring::npos;
-    }
-    for (size_t i = from; i + key.size() <= text.size(); ++i) {
-        if (MatchAt(text, i, key, matchCase)) {
-            return i;
-        }
-    }
-    return std::wstring::npos;
-}
-
-// Last match ending at or before `before`; npos if none. No wrap-around.
-size_t FindBackward(const std::wstring& text, std::wstring_view key, size_t before, bool matchCase) {
-    if (key.empty() || key.size() > text.size() || before < key.size()) {
-        return std::wstring::npos;
-    }
-    for (size_t i = before - key.size() + 1; i-- > 0;) {
-        if (MatchAt(text, i, key, matchCase)) {
-            return i;
-        }
-    }
-    return std::wstring::npos;
-}
-
-} // namespace
 
 FindReplaceController::FindReplaceController(editor::EditView& editView) : editView_(editView) {
     findMessage_ = RegisterWindowMessageW(FINDMSGSTRINGW);
@@ -125,9 +81,9 @@ void FindReplaceController::Search() {
     int selEnd = 0;
     editView_.GetSelection(selStart, selEnd);
 
-    const size_t found = searchDown_
-                             ? FindForward(text, key, static_cast<size_t>(selEnd), matchCase_)
-                             : FindBackward(text, key, static_cast<size_t>(selStart), matchCase_);
+    const size_t found =
+        searchDown_ ? editor::FindForward(text, key, static_cast<size_t>(selEnd), matchCase_)
+                    : editor::FindBackward(text, key, static_cast<size_t>(selStart), matchCase_);
     if (found == std::wstring::npos) {
         ReportNotFound();
         return;
@@ -147,7 +103,7 @@ void FindReplaceController::ReplaceMatchThenFind() {
 
     // Replace only if the current selection is exactly the search text.
     if (static_cast<size_t>(selEnd - selStart) == key.size() &&
-        MatchAt(text, static_cast<size_t>(selStart), key, matchCase_)) {
+        editor::MatchAt(text, static_cast<size_t>(selStart), key, matchCase_)) {
         editView_.InsertText(replaceBuffer_);
     }
     Search();
@@ -158,23 +114,12 @@ void FindReplaceController::ReplaceAll() {
     if (key.empty()) {
         return;
     }
-    const std::wstring replacement = replaceBuffer_;
-
-    editView_.SelectRange(0, 0);
-    // Re-read the text each pass (it changes as we replace); search from the caret,
-    // which sits just past the inserted replacement, so we never re-match it.
-    while (true) {
-        const std::wstring text = editView_.GetText();
-        int selStart = 0;
-        int selEnd = 0;
-        editView_.GetSelection(selStart, selEnd);
-
-        const size_t found = FindForward(text, key, static_cast<size_t>(selEnd), matchCase_);
-        if (found == std::wstring::npos) {
-            break;
-        }
-        editView_.SelectRange(static_cast<int>(found), static_cast<int>(found + key.size()));
-        editView_.InsertText(replacement);
+    const editor::ReplaceAllResult result =
+        editor::ReplaceAllInText(editView_.GetText(), key, replaceBuffer_, matchCase_);
+    if (result.count > 0) {
+        // Select-all + insert applies the rewrite as a single undo unit.
+        editView_.SelectAll();
+        editView_.InsertText(result.text);
     }
     editView_.SelectRange(0, 0);
 }

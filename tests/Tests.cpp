@@ -14,10 +14,13 @@
 #include <string>
 #include <vector>
 
+#include "editor/SearchEngine.cpp"
+#include "editor/UndoManager.cpp"
 #include "file/Encoding.cpp"
 #include "file/FileService.cpp"
 #include "file/TextFile.cpp"
 #include "printing/HeaderFooter.cpp"
+#include "util/CommandLine.cpp"
 #include "util/DateTime.cpp"
 #include "util/FileMapping.cpp"
 #include "util/PathName.hpp"
@@ -426,6 +429,181 @@ void TestFileService() {
     }
 }
 
+void TestSearchEngine() {
+    using notepadxp::editor::FindBackward;
+    using notepadxp::editor::FindForward;
+    using notepadxp::editor::MatchAt;
+    using notepadxp::editor::ReplaceAllInText;
+    constexpr size_t npos = std::wstring::npos;
+
+    const std::wstring text = L"the cat sat on the mat";
+
+    CHECK(FindForward(text, L"the", 0, true) == 0);
+    CHECK(FindForward(text, L"the", 1, true) == 15);
+    CHECK(FindForward(text, L"the", 16, true) == npos);  // No wrap-around.
+    CHECK(FindForward(text, L"THE", 0, false) == 0);     // Case-insensitive.
+    CHECK(FindForward(text, L"THE", 0, true) == npos);
+    CHECK(FindForward(text, L"", 0, true) == npos);      // Empty key never matches.
+    CHECK(FindForward(L"ab", L"abc", 0, true) == npos);  // Key longer than text.
+    CHECK(FindForward(text, L"mat", 19, true) == 19);    // Match flush at the end.
+
+    CHECK(FindBackward(text, L"the", text.size(), true) == 15);
+    CHECK(FindBackward(text, L"the", 15, true) == 0);   // Ends at/before 15.
+    CHECK(FindBackward(text, L"the", 2, true) == npos); // Nothing fits before 2.
+    CHECK(FindBackward(text, L"mat", text.size(), true) == 19);
+
+    CHECK(MatchAt(text, 19, L"mat", true));
+    CHECK(!MatchAt(text, 20, L"mat", true));  // Would run past the end.
+
+    {
+        const auto r = ReplaceAllInText(L"aaaa", L"aa", L"b", true);
+        CHECK(r.text == L"bb");  // Non-overlapping, left to right.
+        CHECK(r.count == 2);
+    }
+    {
+        const auto r = ReplaceAllInText(L"abc", L"b", L"bb", true);
+        CHECK(r.text == L"abbc");  // Replacement containing the key is not re-matched.
+        CHECK(r.count == 1);
+    }
+    {
+        const auto r = ReplaceAllInText(L"a-a-a", L"-", L"", true);
+        CHECK(r.text == L"aaa");
+        CHECK(r.count == 2);
+    }
+    {
+        const auto r = ReplaceAllInText(L"Cat cat", L"cat", L"dog", false);
+        CHECK(r.text == L"dog dog");
+        CHECK(r.count == 2);
+    }
+    {
+        const auto r = ReplaceAllInText(L"xyz", L"q", L"r", true);
+        CHECK(r.text == L"xyz");
+        CHECK(r.count == 0);
+    }
+}
+
+void TestUndoManager() {
+    using notepadxp::editor::UndoManager;
+
+    // Typing coalesces into one unit per word; undo/redo round-trips.
+    {
+        UndoManager u;
+        u.Reset(L"", 0, 0);
+        u.RecordChange(L"h", 1, 1);
+        u.RecordChange(L"he", 2, 2);
+        u.RecordChange(L"hey", 3, 3);
+        CHECK(u.CanUndo());
+        const auto s = u.Undo(L"hey", 3, 3);
+        CHECK(s.has_value());
+        CHECK(s->text == L"");  // One unit for the whole word.
+        CHECK(!u.CanUndo());
+        CHECK(u.CanRedo());
+        const auto r = u.Redo(s->text, s->selStart, s->selEnd);
+        CHECK(r.has_value());
+        CHECK(r->text == L"hey");
+        CHECK(!u.CanRedo());
+    }
+
+    // A new word after a space opens a new unit at the word start.
+    {
+        UndoManager u;
+        u.Reset(L"", 0, 0);
+        u.RecordChange(L"a", 1, 1);
+        u.RecordChange(L"ab", 2, 2);
+        u.RecordChange(L"ab ", 3, 3);
+        u.RecordChange(L"ab c", 4, 4);
+        const auto s = u.Undo(L"ab c", 4, 4);
+        CHECK(s.has_value());
+        CHECK(s->text == L"ab ");  // Only the new word is removed.
+        const auto s2 = u.Undo(s->text, s->selStart, s->selEnd);
+        CHECK(s2.has_value());
+        CHECK(s2->text == L"");
+        CHECK(!u.CanUndo());
+    }
+
+    // A backspace run coalesces into one unit.
+    {
+        UndoManager u;
+        u.Reset(L"abc", 3, 3);
+        u.RecordChange(L"ab", 2, 2);
+        u.RecordChange(L"a", 1, 1);
+        u.RecordChange(L"", 0, 0);
+        const auto s = u.Undo(L"", 0, 0);
+        CHECK(s.has_value());
+        CHECK(s->text == L"abc");
+        CHECK(!u.CanUndo());
+    }
+
+    // A forward-delete run (caret stays put) coalesces too.
+    {
+        UndoManager u;
+        u.Reset(L"abc", 0, 0);
+        u.RecordChange(L"bc", 0, 0);
+        u.RecordChange(L"c", 0, 0);
+        const auto s = u.Undo(L"c", 0, 0);
+        CHECK(s.has_value());
+        CHECK(s->text == L"abc");
+        CHECK(!u.CanUndo());
+    }
+
+    // An edit clears the redo history.
+    {
+        UndoManager u;
+        u.Reset(L"", 0, 0);
+        u.RecordChange(L"a", 1, 1);
+        const auto s = u.Undo(L"a", 1, 1);
+        CHECK(s.has_value());
+        CHECK(u.CanRedo());
+        u.RecordChange(L"b", 1, 1);
+        CHECK(!u.CanRedo());
+    }
+
+    // History depth is capped: 105 bulk units keep only the last 100.
+    {
+        UndoManager u;
+        u.Reset(L"", 0, 0);
+        std::wstring current;
+        for (int i = 0; i < 105; ++i) {
+            current = L"bulk" + std::to_wstring(i);
+            u.RecordChange(current, 0, 0);
+        }
+        int undone = 0;
+        while (u.CanUndo()) {
+            const auto s = u.Undo(current, 0, 0);
+            current = s->text;
+            ++undone;
+        }
+        CHECK(undone == 100);
+    }
+}
+
+void TestCommandLine() {
+    using notepadxp::util::ParseCommandLine;
+
+    {
+        const auto p = ParseCommandLine(L"notepad.exe");
+        CHECK(!p.filePath.has_value());
+        CHECK(!p.forceAnsi);
+        CHECK(!p.forceUnicode);
+    }
+    {
+        const auto p = ParseCommandLine(L"notepad.exe /A file.txt");
+        CHECK(p.forceAnsi);
+        CHECK(!p.forceUnicode);
+        CHECK(p.filePath == L"file.txt");
+    }
+    {
+        const auto p = ParseCommandLine(L"notepad.exe -w \"C:\\My Dir\\notes.txt\"");
+        CHECK(p.forceUnicode);
+        CHECK(p.filePath == L"C:\\My Dir\\notes.txt");
+    }
+    {
+        // First non-switch token wins; later tokens are ignored.
+        const auto p = ParseCommandLine(L"notepad.exe one.txt two.txt");
+        CHECK(p.filePath == L"one.txt");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -434,6 +612,9 @@ int main() {
     TestPathName();
     TestTextFile();
     TestFileService();
+    TestSearchEngine();
+    TestUndoManager();
+    TestCommandLine();
     std::printf("notepadxp tests: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }
