@@ -482,95 +482,130 @@ void TestSearchEngine() {
     }
 }
 
+// Delta builders for the undo tests.
+notepadxp::editor::EditDelta InsDelta(size_t pos, std::wstring_view inserted, wchar_t before) {
+    notepadxp::editor::EditDelta d;
+    d.pos = pos;
+    d.inserted = inserted;
+    d.charBeforePos = before;
+    d.selStartBefore = d.selEndBefore = static_cast<int>(pos);
+    d.selStartAfter = d.selEndAfter = static_cast<int>(pos + inserted.size());
+    return d;
+}
+
+notepadxp::editor::EditDelta DelDelta(size_t pos, std::wstring_view removed, wchar_t before) {
+    notepadxp::editor::EditDelta d;
+    d.pos = pos;
+    d.removed = removed;
+    d.charBeforePos = before;
+    d.selStartBefore = d.selEndBefore = static_cast<int>(pos + removed.size());
+    d.selStartAfter = d.selEndAfter = static_cast<int>(pos);
+    return d;
+}
+
 void TestUndoManager() {
     using notepadxp::editor::UndoManager;
 
     // Typing coalesces into one unit per word; undo/redo round-trips.
     {
         UndoManager u;
-        u.Reset(L"", 0, 0);
-        u.RecordChange(L"h", 1, 1);
-        u.RecordChange(L"he", 2, 2);
-        u.RecordChange(L"hey", 3, 3);
+        u.RecordChange(InsDelta(0, L"h", L'\0'));
+        u.RecordChange(InsDelta(1, L"e", L'h'));
+        u.RecordChange(InsDelta(2, L"y", L'e'));
         CHECK(u.CanUndo());
-        const auto s = u.Undo(L"hey", 3, 3);
-        CHECK(s.has_value());
-        CHECK(s->text == L"");  // One unit for the whole word.
+        const auto unit = u.Undo();
+        CHECK(unit.has_value());
+        CHECK(unit->pos == 0);
+        CHECK(unit->inserted == L"hey");  // One unit for the whole word.
+        CHECK(unit->removed.empty());
         CHECK(!u.CanUndo());
         CHECK(u.CanRedo());
-        const auto r = u.Redo(s->text, s->selStart, s->selEnd);
-        CHECK(r.has_value());
-        CHECK(r->text == L"hey");
+        const auto redone = u.Redo();
+        CHECK(redone.has_value());
+        CHECK(redone->inserted == L"hey");
         CHECK(!u.CanRedo());
+        CHECK(u.CanUndo());
     }
 
     // A new word after a space opens a new unit at the word start.
     {
         UndoManager u;
-        u.Reset(L"", 0, 0);
-        u.RecordChange(L"a", 1, 1);
-        u.RecordChange(L"ab", 2, 2);
-        u.RecordChange(L"ab ", 3, 3);
-        u.RecordChange(L"ab c", 4, 4);
-        const auto s = u.Undo(L"ab c", 4, 4);
-        CHECK(s.has_value());
-        CHECK(s->text == L"ab ");  // Only the new word is removed.
-        const auto s2 = u.Undo(s->text, s->selStart, s->selEnd);
-        CHECK(s2.has_value());
-        CHECK(s2->text == L"");
+        u.RecordChange(InsDelta(0, L"a", L'\0'));
+        u.RecordChange(InsDelta(1, L"b", L'a'));
+        u.RecordChange(InsDelta(2, L" ", L'b'));
+        u.RecordChange(InsDelta(3, L"c", L' '));  // Word start: new unit.
+        const auto unit = u.Undo();
+        CHECK(unit.has_value());
+        CHECK(unit->pos == 3);
+        CHECK(unit->inserted == L"c");  // Only the new word is removed.
+        const auto unit2 = u.Undo();
+        CHECK(unit2.has_value());
+        CHECK(unit2->pos == 0);
+        CHECK(unit2->inserted == L"ab ");
         CHECK(!u.CanUndo());
     }
 
-    // A backspace run coalesces into one unit.
+    // A backspace run coalesces into one unit ("abc" deleted right-to-left).
     {
         UndoManager u;
-        u.Reset(L"abc", 3, 3);
-        u.RecordChange(L"ab", 2, 2);
-        u.RecordChange(L"a", 1, 1);
-        u.RecordChange(L"", 0, 0);
-        const auto s = u.Undo(L"", 0, 0);
-        CHECK(s.has_value());
-        CHECK(s->text == L"abc");
+        u.RecordChange(DelDelta(2, L"c", L'b'));
+        u.RecordChange(DelDelta(1, L"b", L'a'));
+        u.RecordChange(DelDelta(0, L"a", L'\0'));
+        const auto unit = u.Undo();
+        CHECK(unit.has_value());
+        CHECK(unit->pos == 0);
+        CHECK(unit->removed == L"abc");
+        CHECK(unit->inserted.empty());
         CHECK(!u.CanUndo());
     }
 
-    // A forward-delete run (caret stays put) coalesces too.
+    // A forward-delete run (position stays put) coalesces too.
     {
         UndoManager u;
-        u.Reset(L"abc", 0, 0);
-        u.RecordChange(L"bc", 0, 0);
-        u.RecordChange(L"c", 0, 0);
-        const auto s = u.Undo(L"c", 0, 0);
-        CHECK(s.has_value());
-        CHECK(s->text == L"abc");
+        u.RecordChange(DelDelta(0, L"a", L'\0'));
+        u.RecordChange(DelDelta(0, L"b", L'\0'));
+        u.RecordChange(DelDelta(0, L"c", L'\0'));
+        const auto unit = u.Undo();
+        CHECK(unit.has_value());
+        CHECK(unit->pos == 0);
+        CHECK(unit->removed == L"abc");
         CHECK(!u.CanUndo());
+    }
+
+    // An insert after a delete run opens a new unit (kind change).
+    {
+        UndoManager u;
+        u.RecordChange(DelDelta(0, L"a", L'\0'));
+        u.RecordChange(InsDelta(0, L"b", L'\0'));
+        const auto unit = u.Undo();
+        CHECK(unit.has_value());
+        CHECK(unit->inserted == L"b");
+        CHECK(u.CanUndo());
     }
 
     // An edit clears the redo history.
     {
         UndoManager u;
-        u.Reset(L"", 0, 0);
-        u.RecordChange(L"a", 1, 1);
-        const auto s = u.Undo(L"a", 1, 1);
-        CHECK(s.has_value());
+        u.RecordChange(InsDelta(0, L"a", L'\0'));
+        CHECK(u.Undo().has_value());
         CHECK(u.CanRedo());
-        u.RecordChange(L"b", 1, 1);
+        u.RecordChange(InsDelta(0, L"b", L'\0'));
         CHECK(!u.CanRedo());
     }
 
     // History depth is capped: 105 bulk units keep only the last 100.
     {
         UndoManager u;
-        u.Reset(L"", 0, 0);
-        std::wstring current;
         for (int i = 0; i < 105; ++i) {
-            current = L"bulk" + std::to_wstring(i);
-            u.RecordChange(current, 0, 0);
+            notepadxp::editor::EditDelta d;
+            d.pos = 0;
+            d.removed = L"old";
+            d.inserted = L"new" + std::to_wstring(i);  // Bulk: never coalesces.
+            u.RecordChange(d);
         }
         int undone = 0;
         while (u.CanUndo()) {
-            const auto s = u.Undo(current, 0, 0);
-            current = s->text;
+            CHECK(u.Undo().has_value());
             ++undone;
         }
         CHECK(undone == 100);

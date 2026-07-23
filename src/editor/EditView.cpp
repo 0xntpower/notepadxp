@@ -29,7 +29,9 @@ bool EditView::Create(HWND parent, bool wordWrap) {
     edit_.LimitText(0);  // 0 == remove the default text-length cap.
     keyHandler_.SubclassWindow(edit_.m_hWnd);  // Add the word-delete shortcuts.
     keyHandler_.SetCaretNotify([this] { NotifyCaretMaybeMoved(); });
-    undo_.Reset(std::wstring(), 0, 0);
+    undo_.Reset();
+    bridgeText_.clear();
+    bridgeSelStart_ = bridgeSelEnd_ = 0;
     return true;
 }
 
@@ -121,20 +123,17 @@ void EditView::ReapplyFont() {
 }
 
 void EditView::Undo() {
-    int selStart = 0;
-    int selEnd = 0;
-    edit_.GetSel(selStart, selEnd);
-    if (const auto snapshot = undo_.Undo(GetText(), selStart, selEnd)) {
-        ApplySnapshot(*snapshot);
+    if (const auto unit = undo_.Undo()) {
+        // Invert: remove what the unit inserted, restore what it removed.
+        ApplyDelta(unit->pos, unit->inserted.size(), unit->removed, unit->selStartBefore,
+                   unit->selEndBefore);
     }
 }
 
 void EditView::Redo() {
-    int selStart = 0;
-    int selEnd = 0;
-    edit_.GetSel(selStart, selEnd);
-    if (const auto snapshot = undo_.Redo(GetText(), selStart, selEnd)) {
-        ApplySnapshot(*snapshot);
+    if (const auto unit = undo_.Redo()) {
+        ApplyDelta(unit->pos, unit->removed.size(), unit->inserted, unit->selStartAfter,
+                   unit->selEndAfter);
     }
 }
 
@@ -145,17 +144,51 @@ void EditView::OnEditChanged() {
     int selStart = 0;
     int selEnd = 0;
     edit_.GetSel(selStart, selEnd);
-    undo_.RecordChange(GetText(), selStart, selEnd);
+    std::wstring text = GetText();
+
+    // Temporary bridge until DocumentShadow lands: locate the single changed
+    // region as common prefix + suffix against the previous full text.
+    size_t prefix = 0;
+    const size_t shared = std::min(bridgeText_.size(), text.size());
+    while (prefix < shared && bridgeText_[prefix] == text[prefix]) {
+        ++prefix;
+    }
+    size_t oldEnd = bridgeText_.size();
+    size_t newEnd = text.size();
+    while (oldEnd > prefix && newEnd > prefix && bridgeText_[oldEnd - 1] == text[newEnd - 1]) {
+        --oldEnd;
+        --newEnd;
+    }
+    if (oldEnd != prefix || newEnd != prefix) {
+        EditDelta delta;
+        delta.pos = prefix;
+        delta.removed = bridgeText_.substr(prefix, oldEnd - prefix);
+        delta.inserted = text.substr(prefix, newEnd - prefix);
+        delta.charBeforePos = prefix > 0 ? text[prefix - 1] : L'\0';
+        delta.selStartBefore = bridgeSelStart_;
+        delta.selEndBefore = bridgeSelEnd_;
+        delta.selStartAfter = selStart;
+        delta.selEndAfter = selEnd;
+        undo_.RecordChange(delta);
+    }
+    bridgeText_ = std::move(text);
+    bridgeSelStart_ = selStart;
+    bridgeSelEnd_ = selEnd;
     NotifyCaretMaybeMoved();  // Edits move the caret without an EM_SETSEL.
 }
 
-void EditView::ApplySnapshot(const EditSnapshot& snapshot) {
+void EditView::ApplyDelta(size_t pos, size_t removeLen, const std::wstring& insertText,
+                          int selStart, int selEnd) {
     suppressRecording_ = true;
-    edit_.SetWindowText(snapshot.text.c_str());
-    edit_.SetSel(snapshot.selStart, snapshot.selEnd);
+    edit_.SetSel(static_cast<int>(pos), static_cast<int>(pos + removeLen));
+    edit_.ReplaceSel(insertText.c_str(), FALSE);
+    edit_.SetSel(selStart, selEnd);
     edit_.SendMessage(EM_SCROLLCARET);
     edit_.SetModify(TRUE);  // The document differs from its on-disk form again.
     suppressRecording_ = false;
+    bridgeText_.replace(pos, removeLen, insertText);
+    bridgeSelStart_ = selStart;
+    bridgeSelEnd_ = selEnd;
 }
 
 void EditView::Cut() {
@@ -205,7 +238,9 @@ void EditView::Reset() {
     edit_.SetModify(FALSE);
     edit_.SetSel(0, 0);
     suppressRecording_ = false;
-    undo_.Reset(std::wstring(), 0, 0);
+    undo_.Reset();
+    bridgeText_.clear();
+    bridgeSelStart_ = bridgeSelEnd_ = 0;
 }
 
 void EditView::SetText(std::wstring_view text) {
@@ -216,7 +251,9 @@ void EditView::SetText(std::wstring_view text) {
     edit_.SetSel(0, 0);
     edit_.SendMessage(EM_SCROLLCARET);
     suppressRecording_ = false;
-    undo_.Reset(buffer, 0, 0);
+    undo_.Reset();
+    bridgeText_ = buffer;
+    bridgeSelStart_ = bridgeSelEnd_ = 0;
 }
 
 std::wstring EditView::GetText() {

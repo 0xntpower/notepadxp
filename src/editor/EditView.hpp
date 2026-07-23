@@ -117,7 +117,8 @@ private:
 
     [[nodiscard]] static DWORD StyleFor(bool wordWrap) noexcept;
     void ReapplyFont();
-    void ApplySnapshot(const EditSnapshot& snapshot);
+    void ApplyDelta(size_t pos, size_t removeLen, const std::wstring& insertText, int selStart,
+                    int selEnd);
 
     CEdit edit_;
     EditKeyHandler keyHandler_;  // Subclasses edit_: word-delete + caret notify.
@@ -126,6 +127,11 @@ private:
     std::function<void()> caretMoved_;
     int lastCaretLine_ = 0;  // Dedupe cache for caret notifications (0 == none yet).
     int lastCaretCol_ = 0;
+    // Temporary bridge until DocumentShadow lands: previous full text +
+    // selection, diffed on EN_CHANGE to produce the undo delta.
+    std::wstring bridgeText_;
+    int bridgeSelStart_ = 0;
+    int bridgeSelEnd_ = 0;
     bool wordWrap_ = false;
     bool suppressRecording_ = false;  // True while we change text programmatically.
     HWND parent_ = nullptr;
