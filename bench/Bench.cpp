@@ -22,6 +22,9 @@
 #include "editor/UndoManager.cpp"
 #include "file/Encoding.cpp"
 #include "file/TextFile.cpp"
+#include "lang/IndentEngine.cpp"
+#include "lang/JsonFormat.cpp"
+#include "lang/Language.cpp"
 #include "util/FileMapping.cpp"
 
 CAppModule _Module;
@@ -241,6 +244,31 @@ int wmain(int argc, wchar_t** argv) {
         t = Now();
         SendMessageW(edit, WM_CHAR, L'\r', 0);
         Row("probe", "WM_CHAR enter (CRLF)", MsSince(t), "ms");
+    }
+
+    // --- JSON pretty-print throughput ----------------------------------------
+    {
+        std::wstring json = L"{\"items\":[";
+        const std::wstring element =
+            L"{\"id\":123456,\"name\":\"component-alpha\",\"ok\":true,\"values\":[1,2.5e3,null]},";
+        const size_t target = 10 * 1024 * 1024;
+        while (json.size() < target) {
+            json += element;
+        }
+        json.back() = L']';  // Replace the trailing comma.
+        json += L'}';
+        LARGE_INTEGER t = Now();
+        const auto prettied = notepadxp::lang::PrettyPrintJson(json, {false, 2});
+        const double ms = MsSince(t);
+        Verify(prettied.ok, "pretty-print valid input");
+        Row("json pretty-print", "10 MB throughput",
+            (static_cast<double>(json.size()) / (1024.0 * 1024.0)) / (ms / 1000.0), "MB/s");
+        t = Now();
+        const auto minified = notepadxp::lang::MinifyJson(prettied.text);
+        Verify(minified.ok && minified.text == json, "minify(pretty(x)) == x");
+        Row("json minify", "round-trip throughput",
+            (static_cast<double>(prettied.text.size()) / (1024.0 * 1024.0)) / (MsSince(t) / 1000.0),
+            "MB/s");
     }
 
     // --- Zoom font swap ------------------------------------------------------

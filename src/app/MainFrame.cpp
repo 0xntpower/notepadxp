@@ -12,6 +12,7 @@
 #include "file/Encoding.hpp"
 #include "lang/BraceMatch.hpp"
 #include "lang/CommentToggle.hpp"
+#include "lang/JsonFormat.hpp"
 #include "lang/Language.hpp"
 #include "util/DateTime.hpp"
 #include "util/PathName.hpp"
@@ -229,6 +230,31 @@ void MainFrame::OnCommand(UINT notifyCode, int id, CWindow /*control*/) {
         case M_WORDWRAP:
             OnToggleWordWrap();
             break;
+        case M_JSONPRETTY:
+        case M_JSONMINIFY: {
+            const std::wstring text = editView_.GetText();
+            const lang::JsonResult result =
+                id == M_JSONPRETTY
+                    ? lang::PrettyPrintJson(text, fileService_.Document().indentStyle)
+                    : lang::MinifyJson(text);
+            if (!result.ok) {
+                wchar_t message[128] = {0};
+                _snwprintf_s(message, _TRUNCATE, util::LoadStr(IDS_JSONERR).c_str(),
+                             result.errorLine, result.errorCol);
+                util::AlertBox(m_hWnd, util::LoadStr(IDS_NN), message,
+                               MB_OK | MB_ICONEXCLAMATION);
+                editView_.SelectRange(static_cast<int>(result.errorOffset),
+                                      static_cast<int>(result.errorOffset));
+                editView_.SetFocusToEdit();
+                break;
+            }
+            if (result.text != text) {
+                editView_.SelectAll();
+                editView_.InsertText(result.text);  // One undo unit.
+            }
+            editView_.SelectRange(0, 0);
+            break;
+        }
         case M_ZOOMIN:
             AdjustZoom(1);
             break;
@@ -418,6 +444,10 @@ void MainFrame::UpdateMenuState() {
            !lang::TraitsFor(fileService_.Document().language).lineComment.empty());
 
     enable(M_GOTO, !settings_.wordWrap);
+
+    const bool isJson = fileService_.Document().language == lang::Language::Json;
+    enable(M_JSONPRETTY, isJson);
+    enable(M_JSONMINIFY, isJson);
 
     menu.CheckMenuItem(M_WORDWRAP, MF_BYCOMMAND | (settings_.wordWrap ? MF_CHECKED : MF_UNCHECKED));
     menu.CheckMenuItem(M_STATUSBAR,

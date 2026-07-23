@@ -44,6 +44,8 @@
 // Format
 #define M_WORDWRAP              40030
 #define M_SETFONT               40031
+#define M_JSONPRETTY            40032
+#define M_JSONMINIFY            40033
 // View
 #define M_STATUSBAR             40040
 // Zoom (accelerator-only commands; no menu items — classic look).
@@ -124,6 +126,7 @@
 #define IDS_SYSTEM_FILE         43
 #define IDS_FILE                44
 #define IDS_LETTERS             45
+#define IDS_JSONERR             46
 #define IDS_TEXT_FRIENDLY_NAME  469
 
 // --- Context-help IDs ------------------------------------------------------

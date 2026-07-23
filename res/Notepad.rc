@@ -54,6 +54,9 @@ BEGIN
     BEGIN
         MENUITEM "&Word Wrap",              M_WORDWRAP
         MENUITEM "&Font...",                M_SETFONT
+        MENUITEM SEPARATOR
+        MENUITEM "Pretty-Print &JSON",      M_JSONPRETTY
+        MENUITEM "Mi&nify JSON",            M_JSONMINIFY
     END
     POPUP "&View"
     BEGIN
@@ -153,6 +156,7 @@ BEGIN
     // Header/footer formatting letters, in order:
     // File, Page, Time, Date, Center, Right, Left (this string is localizable).
     IDS_LETTERS         "fFpPtTdDcCrRlL"
+    IDS_JSONERR         "Invalid JSON: line %d, column %d"
 END
 
 /////////////////////////////////////////////////////////////////////////////

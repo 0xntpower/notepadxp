@@ -23,6 +23,7 @@
 #include "lang/BraceMatch.cpp"
 #include "lang/CommentToggle.cpp"
 #include "lang/IndentEngine.cpp"
+#include "lang/JsonFormat.cpp"
 #include "lang/Language.cpp"
 #include "printing/HeaderFooter.cpp"
 #include "util/CommandLine.cpp"
@@ -837,6 +838,86 @@ void TestCommentToggle() {
     CHECK(ToggleLineComments(L"remark this", batch) == L"REM remark this");
 }
 
+void TestJsonFormat() {
+    using notepadxp::lang::IndentStyle;
+    using notepadxp::lang::MinifyJson;
+    using notepadxp::lang::PrettyPrintJson;
+    const IndentStyle two{false, 2};
+
+    // Exact pretty output for a nested document.
+    {
+        const auto r = PrettyPrintJson(L"{\"a\":[1,{\"b\":null}],\"c\":\"x\"}", two);
+        CHECK(r.ok);
+        CHECK(r.text ==
+              L"{\r\n"
+              L"  \"a\": [\r\n"
+              L"    1,\r\n"
+              L"    {\r\n"
+              L"      \"b\": null\r\n"
+              L"    }\r\n"
+              L"  ],\r\n"
+              L"  \"c\": \"x\"\r\n"
+              L"}");
+    }
+
+    // Minify strips everything; minify(pretty(x)) == minify(x).
+    {
+        const std::wstring src = L"{ \"a\" : [ 1 , 2 ] , \"b\" : true }";
+        const auto mini = MinifyJson(src);
+        CHECK(mini.ok);
+        CHECK(mini.text == L"{\"a\":[1,2],\"b\":true}");
+        const auto pretty = PrettyPrintJson(src, two);
+        CHECK(pretty.ok);
+        const auto again = MinifyJson(pretty.text);
+        CHECK(again.ok);
+        CHECK(again.text == mini.text);
+    }
+
+    // Lexemes survive byte-identically: huge numbers, exponents, \u escapes.
+    {
+        const auto r = MinifyJson(
+            L"[1e999, 0.10000000000000000001, 123456789012345678901234567890, \"\\u00e9\\n\"]");
+        CHECK(r.ok);
+        CHECK(r.text ==
+              L"[1e999,0.10000000000000000001,123456789012345678901234567890,\"\\u00e9\\n\"]");
+    }
+
+    // Empty containers stay inline.
+    {
+        const auto r = PrettyPrintJson(L"{\"a\":{},\"b\":[]}", two);
+        CHECK(r.ok);
+        CHECK(r.text == L"{\r\n  \"a\": {},\r\n  \"b\": []\r\n}");
+    }
+
+    // LF and CRLF inputs both work.
+    CHECK(PrettyPrintJson(L"{\n\"a\": 1\n}", two).ok);
+    CHECK(PrettyPrintJson(L"{\r\n\"a\": 1\r\n}", two).ok);
+
+    // Errors report offset + line/col.
+    {
+        const auto r = MinifyJson(L"{\"a\":}");
+        CHECK(!r.ok);
+        CHECK(r.errorOffset == 5);
+        CHECK(r.errorLine == 1);
+        CHECK(r.errorCol == 6);
+    }
+    {
+        const auto r = MinifyJson(L"{\r\n  \"a\": 1,,\r\n}");
+        CHECK(!r.ok);
+        CHECK(r.errorLine == 2);
+        CHECK(r.errorCol == 10);  // Second comma, 1-based within line 2.
+    }
+    {
+        const auto r = MinifyJson(L"{\"a\": 1} trailing");
+        CHECK(!r.ok);
+        CHECK(r.errorOffset == 9);
+    }
+    CHECK(!MinifyJson(L"").ok);
+    CHECK(!MinifyJson(L"{\"a\": 1").ok);       // Truncated.
+    CHECK(!MinifyJson(L"{\"a\": bare}").ok);   // Bare word value.
+    CHECK(!MinifyJson(L"{1: 2}").ok);          // Non-string key.
+}
+
 notepadxp::editor::PendingChange Pending(notepadxp::editor::PendingChange::Kind kind, int selStart,
                                          int selEnd, std::wstring inserted = {}) {
     notepadxp::editor::PendingChange p;
@@ -1026,6 +1107,7 @@ int main() {
     TestIndentEngine();
     TestBraceMatch();
     TestCommentToggle();
+    TestJsonFormat();
     std::printf("notepadxp tests: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }
