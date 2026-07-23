@@ -6,6 +6,7 @@
 #include <commdlg.h>
 
 #include "Resource.h"
+#include "util/Measurement.hpp"
 
 namespace notepadxp::printing {
 
@@ -22,14 +23,6 @@ struct PageSetupState {
 
 PageSetupState* StateOf(HWND dialog) {
     return reinterpret_cast<PageSetupState*>(GetWindowLongPtrW(dialog, GWLP_USERDATA));
-}
-
-bool UsesUsMeasurement() {
-    DWORD measure = 1;
-    GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_IMEASURE | LOCALE_RETURN_NUMBER,
-                    reinterpret_cast<LPWSTR>(&measure),
-                    static_cast<int>(sizeof(measure) / sizeof(wchar_t)));
-    return measure != 0;
 }
 
 UINT_PTR CALLBACK PageSetupHookProc(HWND dialog, UINT message, WPARAM /*wParam*/, LPARAM lParam) {
@@ -71,7 +64,7 @@ void PageSetup::ShowDialog(HWND parent) {
     psd.hwndOwner = parent;
     psd.hInstance = GetModuleHandleW(nullptr);
     psd.Flags = PSD_ENABLEPAGESETUPTEMPLATE | PSD_ENABLEPAGESETUPHOOK | PSD_MARGINS |
-                (UsesUsMeasurement() ? PSD_INTHOUSANDTHSOFINCHES
+                (util::UsesUsMeasurement() ? PSD_INTHOUSANDTHSOFINCHES
                                      : PSD_INHUNDREDTHSOFMILLIMETERS);
     psd.rtMargin.left = settings_.marginLeft;
     psd.rtMargin.top = settings_.marginTop;

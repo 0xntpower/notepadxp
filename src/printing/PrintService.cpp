@@ -10,6 +10,8 @@
 #include "Resource.h"
 #include "printing/HeaderFooter.hpp"
 #include "util/GdiGuard.hpp"
+#include "util/Measurement.hpp"
+#include "util/PathName.hpp"
 #include "util/StringTable.hpp"
 
 namespace notepadxp::printing {
@@ -24,21 +26,7 @@ HWND g_abortDialog = nullptr;
 constexpr int kHundredthsMmPerInch = 2540;  // 25.4 mm * 100.
 constexpr int kThousandthsPerInch = 1000;
 constexpr int kTabSizeInChars = 8;
-constexpr int kPointScale = 720;  // 72 pt/inch * 10 (pointSize is in tenths).
 constexpr int kFieldBufferChars = 128;
-
-std::wstring FileNameOnly(const std::wstring& path) {
-    const size_t separator = path.find_last_of(L"\\/");
-    return separator == std::wstring::npos ? path : path.substr(separator + 1);
-}
-
-bool UsesUsMeasurement() {
-    DWORD measure = 1;
-    GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_IMEASURE | LOCALE_RETURN_NUMBER,
-                    reinterpret_cast<LPWSTR>(&measure),
-                    static_cast<int>(sizeof(measure) / sizeof(wchar_t)));
-    return measure != 0;
-}
 
 INT_PTR CALLBACK AbortDialogProc(HWND /*dialog*/, UINT message, WPARAM wParam, LPARAM /*lParam*/) {
     switch (message) {
@@ -122,7 +110,7 @@ void PrintService::Print(HWND parent) {
     HDC dc = pd.hDC;
 
     const std::wstring fileName =
-        document_.untitled ? util::LoadStr(IDS_UNTITLED) : FileNameOnly(document_.filePath);
+        document_.untitled ? util::LoadStr(IDS_UNTITLED) : util::PathLeaf(document_.filePath);
 
     // Device metrics.
     const int dpiX = GetDeviceCaps(dc, LOGPIXELSX);
@@ -135,9 +123,7 @@ void PrintService::Print(HWND parent) {
     const int physOffY = GetDeviceCaps(dc, PHYSICALOFFSETY);
 
     // Font scaled to the printer's DPI.
-    LOGFONTW logFont = settings_.font;
-    logFont.lfHeight = -MulDiv(settings_.pointSize, dpiY, kPointScale);
-    logFont.lfWidth = 0;
+    const LOGFONTW logFont = settings_.ResolvedFont(dc);
     util::GdiGuard fontGuard(CreateFontIndirectW(&logFont));
     const HGDIOBJ oldFont = SelectObject(dc, fontGuard.AsFont());
 
@@ -148,7 +134,7 @@ void PrintService::Print(HWND parent) {
 
     // Margins (in locale units) converted to device pixels, then to borders
     // relative to the printable area (which excludes the physical offsets).
-    const int unitDiv = UsesUsMeasurement() ? kThousandthsPerInch : kHundredthsMmPerInch;
+    const int unitDiv = util::UsesUsMeasurement() ? kThousandthsPerInch : kHundredthsMmPerInch;
     const int leftBorder = std::max(MulDiv(settings_.marginLeft, dpiX, unitDiv) - physOffX, 0);
     const int rightBorder =
         std::max(MulDiv(settings_.marginRight, dpiX, unitDiv) - (physW - printW - physOffX), 0);

@@ -10,6 +10,7 @@
 #include "util/DateTime.hpp"
 #include "util/FileMapping.hpp"
 #include "util/HandleGuard.hpp"
+#include "util/PathName.hpp"
 #include "util/StringTable.hpp"
 
 namespace notepadxp::file {
@@ -18,11 +19,6 @@ namespace {
 
 // Notepad refuses files at/above 1 GiB, matching classic Notepad.
 constexpr long long kMaxFileSize = 0x40000000LL;
-
-std::wstring FileNameOnly(const std::wstring& path) {
-    const size_t separator = path.find_last_of(L"\\/");
-    return separator == std::wstring::npos ? path : path.substr(separator + 1);
-}
 
 // True when the document begins with the classic ".LOG" auto-timestamp marker.
 bool StartsWithLogTag(const std::wstring& text) {
@@ -98,7 +94,7 @@ bool FileService::CheckSave() {
     }
 
     const std::wstring name =
-        document_.untitled ? util::LoadStr(IDS_UNTITLED) : FileNameOnly(document_.filePath);
+        document_.untitled ? util::LoadStr(IDS_UNTITLED) : util::PathLeaf(document_.filePath);
     const std::wstring text = util::LoadAndMerge(IDS_SCBC, name);
     const int answer =
         util::AlertBox(owner_, util::LoadStr(IDS_NN), text, MB_YESNOCANCEL | MB_ICONEXCLAMATION);
@@ -119,7 +115,7 @@ bool FileService::LoadFromPath(const std::wstring& path, std::optional<TextEncod
         const DWORD error = GetLastError();
         if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
             // Offer to create a new file with this name (the file-not-found prompt).
-            const std::wstring message = util::LoadAndMerge(IDS_FNF, FileNameOnly(path));
+            const std::wstring message = util::LoadAndMerge(IDS_FNF, util::PathLeaf(path));
             if (util::AlertBox(owner_, util::LoadStr(IDS_NN), message,
                                MB_YESNO | MB_ICONEXCLAMATION) == IDYES) {
                 editView_.Reset();
@@ -131,7 +127,7 @@ bool FileService::LoadFromPath(const std::wstring& path, std::optional<TextEncod
             return false;
         }
         util::AlertBox(owner_, util::LoadStr(IDS_NN),
-                       util::LoadAndMerge(IDS_DISKERROR, FileNameOnly(path)),
+                       util::LoadAndMerge(IDS_DISKERROR, util::PathLeaf(path)),
                        MB_OK | MB_ICONEXCLAMATION);
         return false;
     }
@@ -140,7 +136,7 @@ bool FileService::LoadFromPath(const std::wstring& path, std::optional<TextEncod
     if (GetFileSizeEx(file.Get(), &size) &&
         (size.QuadPart >= kMaxFileSize || size.HighPart != 0)) {
         util::AlertBox(owner_, util::LoadStr(IDS_NN),
-                       util::LoadAndMerge(IDS_FTL, FileNameOnly(path)),
+                       util::LoadAndMerge(IDS_FTL, util::PathLeaf(path)),
                        MB_OK | MB_ICONEXCLAMATION);
         return false;
     }
@@ -173,7 +169,7 @@ bool FileService::SaveToPath(const std::wstring& path, TextEncoding encoding) {
     bool lossy = false;
     const std::vector<std::byte> bytes = EncodeText(text, encoding, lossy);
     if (lossy) {
-        const std::wstring message = util::LoadAndMerge(IDS_ERRUNICODE, FileNameOnly(path));
+        const std::wstring message = util::LoadAndMerge(IDS_ERRUNICODE, util::PathLeaf(path));
         if (util::AlertBox(owner_, util::LoadStr(IDS_NN), message,
                            MB_OKCANCEL | MB_ICONEXCLAMATION) == IDCANCEL) {
             return false;
@@ -184,7 +180,7 @@ bool FileService::SaveToPath(const std::wstring& path, TextEncoding encoding) {
                                        FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!file.IsValid()) {
         util::AlertBox(owner_, util::LoadStr(IDS_NN),
-                       util::LoadAndMerge(IDS_CREATEERR, FileNameOnly(path)),
+                       util::LoadAndMerge(IDS_CREATEERR, util::PathLeaf(path)),
                        MB_OK | MB_ICONEXCLAMATION);
         return false;
     }
@@ -195,7 +191,7 @@ bool FileService::SaveToPath(const std::wstring& path, TextEncoding encoding) {
             WriteFile(file.Get(), bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr);
         if (ok == FALSE || written != bytes.size()) {
             util::AlertBox(owner_, util::LoadStr(IDS_NN),
-                           util::LoadAndMerge(IDS_DISKERROR, FileNameOnly(path)),
+                           util::LoadAndMerge(IDS_DISKERROR, util::PathLeaf(path)),
                            MB_OK | MB_ICONEXCLAMATION);
             return false;
         }

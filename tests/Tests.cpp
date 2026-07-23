@@ -14,6 +14,7 @@
 
 #include "file/Encoding.cpp"
 #include "printing/HeaderFooter.cpp"
+#include "util/PathName.hpp"
 #include "util/StringTable.cpp"  // Provides util::LoadStr referenced by HeaderFooter.
 
 namespace {
@@ -132,11 +133,22 @@ void TestHeaderFooter() {
     }
 }
 
+void TestPathName() {
+    using notepadxp::util::PathLeaf;
+
+    CHECK(PathLeaf(L"C:\\dir\\notes.txt") == L"notes.txt");
+    CHECK(PathLeaf(L"C:/dir/notes.txt") == L"notes.txt");
+    CHECK(PathLeaf(L"notes.txt") == L"notes.txt");
+    CHECK(PathLeaf(L"C:\\dir\\") == L"");
+    CHECK(PathLeaf(L"") == L"");
+}
+
 } // namespace
 
 int main() {
     TestEncoding();
     TestHeaderFooter();
+    TestPathName();
     std::printf("notepadxp tests: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

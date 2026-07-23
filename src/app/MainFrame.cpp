@@ -11,17 +11,12 @@
 #include "dialogs/GoToDialog.hpp"
 #include "file/Encoding.hpp"
 #include "util/DateTime.hpp"
+#include "util/PathName.hpp"
 #include "util/StringTable.hpp"
 
 namespace notepadxp::app {
 
 namespace {
-
-// Final path component (after the last separator), used for the title bar.
-std::wstring FileNameFromPath(const std::wstring& path) {
-    const size_t separator = path.find_last_of(L"\\/");
-    return separator == std::wstring::npos ? path : path.substr(separator + 1);
-}
 
 bool ClipboardHasText() {
     return IsClipboardFormatAvailable(CF_UNICODETEXT) != FALSE ||
@@ -346,7 +341,7 @@ void MainFrame::ApplyFontFromSettings() {
 
 void MainFrame::UpdateTitle() {
     const std::wstring name =
-        document_.untitled ? util::LoadStr(IDS_UNTITLED) : FileNameFromPath(document_.filePath);
+        document_.untitled ? util::LoadStr(IDS_UNTITLED) : util::PathLeaf(document_.filePath);
     const std::wstring title = name + util::LoadStr(IDS_NOTEPAD);  // " - Notepad"
     SetWindowText(title.c_str());
 }
