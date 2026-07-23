@@ -3,11 +3,11 @@
 #include <optional>
 #include <string>
 
-#include <commdlg.h>   // ChooseFontW (excluded by WIN32_LEAN_AND_MEAN).
 #include <shellapi.h>  // DragAcceptFiles / DragQueryFileW / DragFinish.
 
 #include "Resource.h"
 #include "dialogs/AboutBox.hpp"
+#include "dialogs/FontDialog.hpp"
 #include "dialogs/GoToDialog.hpp"
 #include "file/Encoding.hpp"
 #include "util/DateTime.hpp"
@@ -293,18 +293,12 @@ void MainFrame::OnToggleStatusBar() {
 
 void MainFrame::OnChooseFont() {
     HDC dc = ::GetDC(nullptr);
-    LOGFONTW logFont = settings_.ResolvedFont(dc);
+    const LOGFONTW current = settings_.ResolvedFont(dc);
     ::ReleaseDC(nullptr, dc);
 
-    CHOOSEFONTW chooseFont{};
-    chooseFont.lStructSize = sizeof(chooseFont);
-    chooseFont.hwndOwner = m_hWnd;
-    chooseFont.lpLogFont = &logFont;
-    chooseFont.Flags = CF_INITTOLOGFONTSTRUCT | CF_SCREENFONTS | CF_NOVERTFONTS;
-    chooseFont.nFontType = SCREEN_FONTTYPE;
-    if (ChooseFontW(&chooseFont)) {
-        settings_.font = logFont;
-        settings_.pointSize = chooseFont.iPointSize;  // Tenths of a point.
+    if (const auto chosen = dialogs::FontDialog::Choose(m_hWnd, current)) {
+        settings_.font = chosen->font;
+        settings_.pointSize = chosen->pointSize;
         ApplyFontFromSettings();
     }
 }
