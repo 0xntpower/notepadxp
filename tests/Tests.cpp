@@ -256,7 +256,7 @@ public:
         text.clear();
         modified = false;
     }
-    void SetText(std::wstring_view t) override {
+    void SetText(const std::wstring& t) override {
         text = t;
         modified = false;
     }
@@ -273,7 +273,7 @@ public:
         modified = m;
     }
     void MoveCaretToEnd() override {}
-    void InsertText(std::wstring_view t) override {
+    void InsertText(const std::wstring& t) override {
         text += t;
         modified = true;
     }
@@ -626,28 +626,57 @@ void TestFileService() {
 void TestSearchEngine() {
     using notepadxp::editor::FindBackward;
     using notepadxp::editor::FindForward;
-    using notepadxp::editor::MatchAt;
+    using notepadxp::editor::IsMatch;
     using notepadxp::editor::ReplaceAllInText;
     constexpr size_t npos = std::wstring::npos;
 
     const std::wstring text = L"the cat sat on the mat";
 
-    CHECK(FindForward(text, L"the", 0, true) == 0);
-    CHECK(FindForward(text, L"the", 1, true) == 15);
-    CHECK(FindForward(text, L"the", 16, true) == npos);  // No wrap-around.
-    CHECK(FindForward(text, L"THE", 0, false) == 0);     // Case-insensitive.
-    CHECK(FindForward(text, L"THE", 0, true) == npos);
-    CHECK(FindForward(text, L"", 0, true) == npos);      // Empty key never matches.
-    CHECK(FindForward(L"ab", L"abc", 0, true) == npos);  // Key longer than text.
-    CHECK(FindForward(text, L"mat", 19, true) == 19);    // Match flush at the end.
+    CHECK(FindForward(text, L"the", 0, true).pos == 0);
+    CHECK(FindForward(text, L"the", 0, true).length == 3);
+    CHECK(FindForward(text, L"the", 1, true).pos == 15);
+    CHECK(FindForward(text, L"the", 16, true).pos == npos);  // No wrap-around.
+    CHECK(FindForward(text, L"THE", 0, false).pos == 0);     // Case-insensitive.
+    CHECK(FindForward(text, L"THE", 1, false).pos == 15);
+    CHECK(FindForward(text, L"THE", 16, false).pos == npos);
+    CHECK(FindForward(text, L"THE", 0, true).pos == npos);
+    CHECK(FindForward(text, L"", 0, true).pos == npos);      // Empty key never matches.
+    CHECK(FindForward(text, L"", 0, false).pos == npos);
+    CHECK(FindForward(L"ab", L"abc", 0, true).pos == npos);  // Key longer than text.
+    CHECK(FindForward(L"ab", L"abc", 0, false).pos == npos);
+    CHECK(FindForward(text, L"mat", 19, true).pos == 19);    // Match flush at the end.
+    CHECK(FindForward(text, L"MAT", 19, false).pos == 19);
+    CHECK(FindForward(text, L"mat", text.size(), false).pos == npos);  // From the very end.
 
-    CHECK(FindBackward(text, L"the", text.size(), true) == 15);
-    CHECK(FindBackward(text, L"the", 15, true) == 0);   // Ends at/before 15.
-    CHECK(FindBackward(text, L"the", 2, true) == npos); // Nothing fits before 2.
-    CHECK(FindBackward(text, L"mat", text.size(), true) == 19);
+    CHECK(FindBackward(text, L"the", text.size(), true).pos == 15);
+    CHECK(FindBackward(text, L"the", 15, true).pos == 0);    // Ends at/before 15.
+    CHECK(FindBackward(text, L"the", 2, true).pos == npos);  // Nothing fits before 2.
+    CHECK(FindBackward(text, L"mat", text.size(), true).pos == 19);
+    CHECK(FindBackward(text, L"THE", text.size(), false).pos == 15);
+    CHECK(FindBackward(text, L"THE", 17, false).pos == 0);   // "the" at 15 ends past 17.
+    CHECK(FindBackward(text, L"THE", 2, false).pos == npos);
+    CHECK(FindBackward(text, L"THE", 0, false).pos == npos);
 
-    CHECK(MatchAt(text, 19, L"mat", true));
-    CHECK(!MatchAt(text, 20, L"mat", true));  // Would run past the end.
+    // Ignore-case matching is linguistic: a precomposed key finds the
+    // decomposed spelling, and the match length is the text's, not the key's.
+    {
+        const std::wstring decomposed = L"a café b";
+        const auto m = FindForward(decomposed, L"CAFÉ", 0, false);
+        CHECK(m.pos == 2);
+        CHECK(m.length == 5);
+        CHECK(FindBackward(decomposed, L"CAFÉ", decomposed.size(), false).length == 5);
+        const auto r = ReplaceAllInText(decomposed, L"café", L"tea", false);
+        CHECK(r.text == L"a tea b");
+        CHECK(r.count == 1);
+    }
+
+    // The selection test Replace uses, under both case rules.
+    CHECK(IsMatch(L"mat", L"mat", true));
+    CHECK(!IsMatch(L"ma", L"mat", true));
+    CHECK(!IsMatch(L"MAT", L"mat", true));
+    CHECK(IsMatch(L"MAT", L"mat", false));
+    CHECK(!IsMatch(L"", L"mat", false));
+    CHECK(IsMatch(L"café", L"CAFÉ", false));
 
     {
         const auto r = ReplaceAllInText(L"aaaa", L"aa", L"b", true);
@@ -1123,15 +1152,15 @@ void TestDocumentShadow() {
     using notepadxp::editor::DocumentShadow;
     using Kind = notepadxp::editor::PendingChange::Kind;
 
-    // A reader that must not be consulted on the fast path: returns a poison
-    // value that would corrupt the shadow if the fallback ran.
-    const std::function<std::wstring()> poison = [] { return std::wstring(L"POISON"); };
+    // The fast path checks only the live text's length, never its characters.
+    // A same-length poison view would corrupt the shadow if the diff ran.
+    const auto poison = [](size_t length) { return std::wstring(length, L'#'); };
 
     // Unmaterialized capture: materializes, yields no delta.
     {
         DocumentShadow s;
         CHECK(!s.IsMaterialized());
-        CHECK(!s.CaptureChange(5, 5, 5, [] { return std::wstring(L"hello"); }).has_value());
+        CHECK(!s.CaptureChange(5, 5, L"hello").has_value());
         CHECK(s.IsMaterialized());
         CHECK(s.Text() == L"hello");
         CHECK(s.FallbackCount() == 0);
@@ -1142,7 +1171,7 @@ void TestDocumentShadow() {
         DocumentShadow s;
         s.Materialize(L"hello");
         s.SetPending(Pending(Kind::ReplaceSelection, 5, 5, L"X"));
-        const auto d = s.CaptureChange(6, 6, 6, poison);
+        const auto d = s.CaptureChange(6, 6, poison(6));
         CHECK(d.has_value());
         CHECK(d->pos == 5);
         CHECK(d->inserted == L"X");
@@ -1157,11 +1186,37 @@ void TestDocumentShadow() {
         DocumentShadow s;
         s.Materialize(L"hello");
         s.SetPending(Pending(Kind::ReplaceSelection, 0, 5, L"Hi"));
-        const auto d = s.CaptureChange(2, 2, 2, poison);
+        const auto d = s.CaptureChange(2, 2, poison(2));
         CHECK(d.has_value());
         CHECK(d->removed == L"hello");
         CHECK(d->inserted == L"Hi");
         CHECK(s.Text() == L"Hi");
+    }
+
+    // The control reports a selection replace as two changes, the delete and
+    // then the insert. They must still make one delta and never fall back.
+    {
+        DocumentShadow s;
+        s.Materialize(L"hello world");
+        s.SetPending(Pending(Kind::ReplaceSelection, 0, 5, L"HELLO"));
+        CHECK(!s.CaptureChange(0, 0, poison(6)).has_value());  // Delete half.
+        CHECK(s.Text() == L" world");
+        const auto d = s.CaptureChange(5, 5, poison(11));        // Insert half.
+        CHECK(d.has_value());
+        CHECK(d->pos == 0);
+        CHECK(d->removed == L"hello");
+        CHECK(d->inserted == L"HELLO");
+        CHECK(d->selStartBefore == 0);
+        CHECK(d->selEndBefore == 5);
+        CHECK(s.Text() == L"HELLO world");
+        CHECK(s.FallbackCount() == 0);
+
+        // Pasting identical text over the selection: two halves, no delta.
+        s.SetPending(Pending(Kind::ReplaceSelection, 0, 5, L"HELLO"));
+        CHECK(!s.CaptureChange(0, 0, poison(6)).has_value());
+        CHECK(!s.CaptureChange(5, 5, poison(11)).has_value());
+        CHECK(s.Text() == L"HELLO world");
+        CHECK(s.FallbackCount() == 0);
     }
 
     // Backspace, with and without a selection.
@@ -1169,12 +1224,12 @@ void TestDocumentShadow() {
         DocumentShadow s;
         s.Materialize(L"hello");
         s.SetPending(Pending(Kind::BackspaceOne, 5, 5));
-        const auto d = s.CaptureChange(4, 4, 4, poison);
+        const auto d = s.CaptureChange(4, 4, poison(4));
         CHECK(d.has_value());
         CHECK(d->pos == 4);
         CHECK(d->removed == L"o");
         s.SetPending(Pending(Kind::BackspaceOne, 1, 3));
-        const auto d2 = s.CaptureChange(2, 1, 1, poison);
+        const auto d2 = s.CaptureChange(1, 1, poison(2));
         CHECK(d2.has_value());
         CHECK(d2->pos == 1);
         CHECK(d2->removed == L"el");
@@ -1186,7 +1241,7 @@ void TestDocumentShadow() {
         DocumentShadow s;
         s.Materialize(L"hello");
         s.SetPending(Pending(Kind::DeleteOne, 0, 0));
-        const auto d = s.CaptureChange(4, 0, 0, poison);
+        const auto d = s.CaptureChange(0, 0, poison(4));
         CHECK(d.has_value());
         CHECK(d->pos == 0);
         CHECK(d->removed == L"h");
@@ -1198,7 +1253,7 @@ void TestDocumentShadow() {
         DocumentShadow s;
         s.Materialize(L"abcdef");
         s.SetPending(Pending(Kind::ReplaceSelection, 2, 4, L"XY\r\nZ"));
-        const auto d = s.CaptureChange(9, 7, 7, poison);
+        const auto d = s.CaptureChange(7, 7, poison(9));
         CHECK(d.has_value());
         CHECK(d->removed == L"cd");
         CHECK(d->inserted == L"XY\r\nZ");
@@ -1211,7 +1266,7 @@ void TestDocumentShadow() {
         DocumentShadow s;
         s.Materialize(L"abc");
         s.SetPending(Pending(Kind::ReplaceSelection, 0, 0, L"Q"));
-        const auto d = s.CaptureChange(7, 7, 7, [] { return std::wstring(L"abcdefg"); });
+        const auto d = s.CaptureChange(7, 7, L"abcdefg");
         CHECK(d.has_value());
         CHECK(d->pos == 3);
         CHECK(d->inserted == L"defg");
@@ -1224,11 +1279,37 @@ void TestDocumentShadow() {
         DocumentShadow s;
         s.Materialize(L"abc");
         s.SetPending(Pending(Kind::Unknown, 0, 0));
-        CHECK(s.CaptureChange(4, 4, 4, [] { return std::wstring(L"abcd"); }).has_value());
+        CHECK(s.CaptureChange(4, 4, L"abcd").has_value());
         CHECK(s.FallbackCount() == 1);
-        CHECK(s.CaptureChange(5, 5, 5, [] { return std::wstring(L"abcde"); }).has_value());
+        CHECK(s.CaptureChange(5, 5, L"abcde").has_value());
         CHECK(s.FallbackCount() == 2);
         CHECK(s.Text() == L"abcde");
+    }
+
+    // The fallback diff across block-sized runs, and an ambiguous repeat.
+    {
+        std::wstring before(10000, L'a');
+        before[2] = L'x';
+        before[9990] = L'y';
+        std::wstring after = before;
+        after.replace(5000, 1, L"QRS");
+        DocumentShadow s;
+        s.Materialize(before);
+        const auto d = s.CaptureChange(5003, 5003, after);
+        CHECK(d.has_value());
+        CHECK(d->pos == 5000);
+        CHECK(d->removed == L"a");
+        CHECK(d->inserted == L"QRS");
+        CHECK(s.Text() == after);
+
+        DocumentShadow r;
+        r.Materialize(L"aaaa");
+        const auto d2 = r.CaptureChange(5, 5, L"aaaaa");
+        CHECK(d2.has_value());
+        CHECK(d2->pos == 4);
+        CHECK(d2->inserted == L"a");
+        CHECK(d2->removed.empty());
+        CHECK(r.Text() == L"aaaaa");
     }
 
     // Pasting text identical to the selection records nothing.
@@ -1236,7 +1317,7 @@ void TestDocumentShadow() {
         DocumentShadow s;
         s.Materialize(L"abc");
         s.SetPending(Pending(Kind::ReplaceSelection, 0, 3, L"abc"));
-        CHECK(!s.CaptureChange(3, 3, 3, poison).has_value());
+        CHECK(!s.CaptureChange(3, 3, poison(3)).has_value());
         CHECK(s.FallbackCount() == 0);
         CHECK(s.Text() == L"abc");
     }
@@ -1276,9 +1357,17 @@ void TestCommandLine() {
         CHECK(p.filePath == L"C:\\My Dir\\notes.txt");
     }
     {
-        // First non-switch token wins; later tokens are ignored.
+        // First non-switch token wins. Later tokens are ignored.
         const auto p = ParseCommandLine(L"notepad.exe one.txt two.txt");
         CHECK(p.filePath == L"one.txt");
+    }
+    {
+        // A quoted program path with blanks, with and without arguments.
+        CHECK(!ParseCommandLine(L"\"C:\\Program Files\\np.exe\"").filePath.has_value());
+        CHECK(!ParseCommandLine(L"\"C:\\Program Files\\np.exe\"  ").filePath.has_value());
+        CHECK(ParseCommandLine(L"\"C:\\Program Files\\np.exe\" a.txt").filePath == L"a.txt");
+        CHECK(ParseCommandLine(L"np.exe\ta.txt").filePath == L"a.txt");
+        CHECK(!ParseCommandLine(L"np.exe   ").filePath.has_value());
     }
 }
 

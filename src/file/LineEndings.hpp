@@ -24,11 +24,11 @@ enum class LineEnding {
 [[nodiscard]] LineEnding DetectLineEnding(std::wstring_view text);
 
 /// @brief Rewrite every CRLF / lone LF / lone CR in @p text as CRLF, for the
-///        Edit control.
-[[nodiscard]] std::wstring NormalizeToCrlf(std::wstring_view text);
+///        Edit control. Text that is already all-CRLF is returned as is.
+[[nodiscard]] std::wstring NormalizeToCrlf(std::wstring text);
 
 /// @brief Rewrite the CRLF newlines in @p text (the control's form) as
-///        @p target, for writing back to disk.
-[[nodiscard]] std::wstring ConvertFromCrlf(std::wstring_view text, LineEnding target);
+///        @p target, in place, for writing back to disk.
+[[nodiscard]] std::wstring ConvertFromCrlf(std::wstring text, LineEnding target);
 
 } // namespace notepadxp::file

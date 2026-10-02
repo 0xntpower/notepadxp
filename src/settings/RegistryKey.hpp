@@ -3,7 +3,6 @@
 // RegistryKey.hpp — RAII wrapper over an HKEY with typed get/set helpers.
 
 #include <string>
-#include <string_view>
 
 #include "util/WinLean.hpp"
 
@@ -24,21 +23,25 @@ public:
 
     /// @brief Open @p subKey under @p root, creating it if absent.
     /// @return A valid key on success, an empty (invalid) key on failure.
-    [[nodiscard]] static RegistryKey CreateOrOpen(HKEY root, std::wstring_view subKey);
+    [[nodiscard]] static RegistryKey CreateOrOpen(HKEY root, const wchar_t* subKey);
+
+    /// @brief Open an existing @p subKey under @p root for reading only.
+    /// @return A valid key on success, an empty (invalid) key if absent.
+    [[nodiscard]] static RegistryKey OpenForRead(HKEY root, const wchar_t* subKey);
 
     [[nodiscard]] bool IsValid() const noexcept {
         return key_ != nullptr;
     }
 
     /// @brief Read a REG_DWORD; returns @p defaultValue if missing or wrong type.
-    [[nodiscard]] DWORD GetDword(std::wstring_view name, DWORD defaultValue) const;
+    [[nodiscard]] DWORD GetDword(const wchar_t* name, DWORD defaultValue) const;
 
-    /// @brief Read a REG_SZ; returns @p defaultValue if missing or wrong type.
-    [[nodiscard]] std::wstring GetString(std::wstring_view name,
-                                         std::wstring_view defaultValue) const;
+    /// @brief Read a REG_SZ. Returns @p defaultValue if missing or wrong type.
+    [[nodiscard]] std::wstring GetString(const wchar_t* name,
+                                         const std::wstring& defaultValue) const;
 
-    bool SetDword(std::wstring_view name, DWORD value) const;
-    bool SetString(std::wstring_view name, std::wstring_view value) const;
+    bool SetDword(const wchar_t* name, DWORD value) const;
+    bool SetString(const wchar_t* name, const std::wstring& value) const;
 
 private:
     explicit RegistryKey(HKEY key) noexcept : key_(key) {}

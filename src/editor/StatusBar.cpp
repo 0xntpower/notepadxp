@@ -79,7 +79,8 @@ void StatusBar::SetLineCol(int line, int col) {
     if (status_.m_hWnd == nullptr) {
         return;
     }
-    const std::wstring format = util::LoadStr(IDS_LINECOL);  // "   Ln %d, Col %d  "
+    // Loaded once: this runs on every caret move.
+    static const std::wstring format = util::LoadStr(IDS_LINECOL);  // "   Ln %d, Col %d  "
     std::array<wchar_t, kTextBufferChars> buffer{};
     // The format string is our own resource with exactly two %d fields.
     _snwprintf_s(buffer.data(), buffer.size(), _TRUNCATE, format.c_str(), line, col);

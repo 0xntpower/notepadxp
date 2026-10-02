@@ -1,6 +1,7 @@
 #include "dialogs/FindReplaceController.hpp"
 
 #include <string>
+#include <string_view>
 
 #include "Resource.h"
 #include "editor/SearchEngine.hpp"
@@ -71,51 +72,58 @@ void FindReplaceController::HandleFindMessage(WPARAM /*wParam*/, LPARAM lParam) 
     }
 }
 
+// The searches read the control's buffer in place through a LockText()
+// temporary, which is released at the end of its statement, before the
+// selection or the text is changed.
+
 void FindReplaceController::Search() {
-    const std::wstring key = findBuffer_;
+    const std::wstring_view key = findBuffer_;
     if (key.empty()) {
         return;
     }
-    const std::wstring text = editView_.GetText();
     int selStart = 0;
     int selEnd = 0;
     editView_.GetSelection(selStart, selEnd);
 
-    const size_t found =
-        searchDown_ ? editor::FindForward(text, key, static_cast<size_t>(selEnd), matchCase_)
-                    : editor::FindBackward(text, key, static_cast<size_t>(selStart), matchCase_);
-    if (found == std::wstring::npos) {
+    const editor::Match found =
+        searchDown_ ? editor::FindForward(editView_.LockText().View(), key,
+                                          static_cast<size_t>(selEnd), matchCase_)
+                    : editor::FindBackward(editView_.LockText().View(), key,
+                                           static_cast<size_t>(selStart), matchCase_);
+    if (found.pos == std::wstring_view::npos) {
         ReportNotFound();
         return;
     }
-    editView_.SelectRange(static_cast<int>(found), static_cast<int>(found + key.size()));
+    editView_.SelectRange(static_cast<int>(found.pos), static_cast<int>(found.pos + found.length));
 }
 
 void FindReplaceController::ReplaceMatchThenFind() {
-    const std::wstring key = findBuffer_;
+    const std::wstring_view key = findBuffer_;
     if (key.empty()) {
         return;
     }
-    const std::wstring text = editView_.GetText();
     int selStart = 0;
     int selEnd = 0;
     editView_.GetSelection(selStart, selEnd);
 
     // Replace only if the current selection is exactly the search text.
-    if (static_cast<size_t>(selEnd - selStart) == key.size() &&
-        editor::MatchAt(text, static_cast<size_t>(selStart), key, matchCase_)) {
+    const bool selectionMatches = editor::IsMatch(
+        editView_.LockText().View().substr(static_cast<size_t>(selStart),
+                                           static_cast<size_t>(selEnd - selStart)),
+        key, matchCase_);
+    if (selectionMatches) {
         editView_.InsertText(replaceBuffer_);
     }
     Search();
 }
 
 void FindReplaceController::ReplaceAll() {
-    const std::wstring key = findBuffer_;
+    const std::wstring_view key = findBuffer_;
     if (key.empty()) {
         return;
     }
-    const editor::ReplaceAllResult result =
-        editor::ReplaceAllInText(editView_.GetText(), key, replaceBuffer_, matchCase_);
+    const editor::ReplaceAllResult result = editor::ReplaceAllInText(
+        editView_.LockText().View(), key, replaceBuffer_, matchCase_);
     if (result.count > 0) {
         // Select-all + insert applies the rewrite as a single undo unit.
         editView_.SelectAll();

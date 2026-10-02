@@ -17,7 +17,7 @@ public:
     virtual void Reset() = 0;
 
     /// @brief Replace all text with @p text and clear the modified flag.
-    virtual void SetText(std::wstring_view text) = 0;
+    virtual void SetText(const std::wstring& text) = 0;
 
     /// @brief Return the full document text.
     [[nodiscard]] virtual std::wstring GetText() = 0;
@@ -30,7 +30,7 @@ public:
     virtual void MoveCaretToEnd() = 0;
 
     /// @brief Replace the current selection with @p text.
-    virtual void InsertText(std::wstring_view text) = 0;
+    virtual void InsertText(const std::wstring& text) = 0;
 
     /// @brief Append external (on-disk) content at the end without touching
     ///        undo or the modified flag; caret follows the end (follow tail).

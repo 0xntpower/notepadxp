@@ -236,7 +236,8 @@ BEGIN
     PUSHBUTTON      "Cancel", IDCANCEL, 78, 34, 50, 14
 END
 
-// About NotepadXP. (Keep the version line in sync with VERSIONINFO below.)
+// About NotepadXP. The version line is filled in from NOTEPADXP_VERSION_STRING
+// when the box opens (rc.exe cannot concatenate strings in a dialog template).
 IDD_ABOUT DIALOG DISCARDABLE 0, 0, 220, 100
 STYLE DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "About NotepadXP"
@@ -244,7 +245,7 @@ FONT 8, "MS Shell Dlg"
 BEGIN
     ICON            ID_APPICON, -1, 14, 16, 20, 20
     LTEXT           "NotepadXP", -1, 46, 16, 160, 10
-    LTEXT           "Version 1.0", -1, 46, 28, 160, 10
+    LTEXT           "", IDC_ABOUT_VERSION, 46, 28, 160, 10
     LTEXT           "A faithful recreation of the classic Windows Notepad in modern C++20.",
                     -1, 14, 50, 192, 18
     LTEXT           "Copyright \251 2026 ntpower", -1, 14, 72, 192, 10
@@ -255,8 +256,8 @@ END
 // Version
 
 VS_VERSION_INFO VERSIONINFO
-    FILEVERSION    1, 0, 0, 0
-    PRODUCTVERSION 1, 0, 0, 0
+    FILEVERSION    NOTEPADXP_VERSION_MAJOR, NOTEPADXP_VERSION_MINOR, NOTEPADXP_VERSION_PATCH, 0
+    PRODUCTVERSION NOTEPADXP_VERSION_MAJOR, NOTEPADXP_VERSION_MINOR, NOTEPADXP_VERSION_PATCH, 0
     FILEFLAGSMASK  0x3fL
 #ifdef _DEBUG
     FILEFLAGS      0x1L
@@ -273,12 +274,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "NotepadXP project"
             VALUE "FileDescription",  "Notepad"
-            VALUE "FileVersion",      "1.0.0.0"
+            VALUE "FileVersion",      NOTEPADXP_VERSION_STRING
             VALUE "InternalName",     "Notepad"
             VALUE "LegalCopyright",   "NotepadXP. A faithful, clean-room recreation of the classic Notepad."
             VALUE "OriginalFilename", "notepadxp.exe"
             VALUE "ProductName",      "NotepadXP"
-            VALUE "ProductVersion",   "1.0.0.0"
+            VALUE "ProductVersion",   NOTEPADXP_VERSION_STRING
         END
     END
     BLOCK "VarFileInfo"

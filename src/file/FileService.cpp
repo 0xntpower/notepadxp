@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "Resource.h"
@@ -164,7 +165,7 @@ bool FileService::CheckSave() {
 }
 
 bool FileService::LoadFromPath(const std::wstring& path, std::optional<TextEncoding> forced) {
-    const TextFileLoadResult loaded = LoadTextFile(path, forced);
+    TextFileLoadResult loaded = LoadTextFile(path, forced);
     switch (loaded.status) {
         case LoadStatus::NotFound:
             // Offer to create a new file with this name (the file-not-found prompt).
@@ -194,15 +195,16 @@ bool FileService::LoadFromPath(const std::wstring& path, std::optional<TextEncod
     // control renders LF-only (Unix) and CR-only files with real line breaks;
     // the original style is restored on save.
     document_.lineEnding = DetectLineEnding(loaded.text);
-    buffer_.SetText(NormalizeToCrlf(loaded.text));
     document_.filePath = path;
     document_.untitled = false;
     document_.encoding = loaded.encoding;
     DetectDocumentLanguage(loaded.text);
+    const bool logTag = StartsWithLogTag(loaded.text);
+    buffer_.SetText(NormalizeToCrlf(std::move(loaded.text)));  // No copy when already CRLF.
     watcher_.Arm(path);
 
     // ".LOG" files get a timestamp appended at end-of-file on open.
-    if (StartsWithLogTag(loaded.text)) {
+    if (logTag) {
         buffer_.MoveCaretToEnd();
         buffer_.InsertText(util::FormatTimestamp(true));
     }

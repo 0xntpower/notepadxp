@@ -107,20 +107,19 @@ bool EditView::SetWordWrap(bool wordWrap) {
     }
 
     // Preserve the document, modify flag and caret across the recreate.
-    const int length = edit_.GetWindowTextLength();
-    std::wstring text(static_cast<size_t>(length) + 1, L'\0');
-    if (length > 0) {
-        edit_.GetWindowText(text.data(), length + 1);
-    }
-    text.resize(static_cast<size_t>(length));
+    const std::wstring text = GetText();
     const BOOL modified = edit_.GetModify();
     int selStart = 0;
     int selEnd = 0;
     edit_.GetSel(selStart, selEnd);
 
+    // Create at the live size: a zero-width wrapping control would first wrap
+    // the whole document one character per line (over a minute at 10 MB).
+    RECT bounds = {0, 0, 0, 0};
+    edit_.GetWindowRect(&bounds);
+    ::MapWindowPoints(nullptr, parent_, reinterpret_cast<POINT*>(&bounds), 2);
     CEdit replacement;
-    RECT empty = {0, 0, 0, 0};
-    const HWND created = replacement.Create(parent_, &empty, nullptr, StyleFor(wordWrap),
+    const HWND created = replacement.Create(parent_, &bounds, nullptr, StyleFor(wordWrap),
                                             WS_EX_CLIENTEDGE, static_cast<UINT>(ID_EDIT));
     if (created == nullptr) {
         return false;  // Leave the existing control untouched.
@@ -198,8 +197,9 @@ void EditView::OnEditChanged() {
     int selStart = 0;
     int selEnd = 0;
     edit_.GetSel(selStart, selEnd);
-    const auto delta = shadow_.CaptureChange(static_cast<size_t>(TextLength()), selStart, selEnd,
-                                             [this] { return GetText(); });
+    // The lock is O(1) and released at the end of this statement, before any
+    // further message reaches the control.
+    const auto delta = shadow_.CaptureChange(selStart, selEnd, LockText().View());
     if (delta.has_value()) {
         undo_.RecordChange(*delta);
     }
@@ -278,9 +278,8 @@ void EditView::SelectAll() {
     edit_.SetSelAll();
 }
 
-void EditView::InsertText(std::wstring_view text) {
-    const std::wstring buffer(text);
-    edit_.ReplaceSel(buffer.c_str(), TRUE);  // TRUE: a single undo unit.
+void EditView::InsertText(const std::wstring& text) {
+    edit_.ReplaceSel(text.c_str(), TRUE);  // TRUE: a single undo unit.
 }
 
 void EditView::GoToLine(int lineNumber) {
@@ -309,10 +308,9 @@ void EditView::Reset() {
     shadow_.Reset();
 }
 
-void EditView::SetText(std::wstring_view text) {
-    const std::wstring buffer(text);
+void EditView::SetText(const std::wstring& text) {
     suppressRecording_ = true;
-    edit_.SetWindowText(buffer.c_str());
+    edit_.SetWindowText(text.c_str());
     edit_.SetModify(FALSE);
     edit_.SetSel(0, 0);
     edit_.SendMessage(EM_SCROLLCARET);
@@ -322,13 +320,7 @@ void EditView::SetText(std::wstring_view text) {
 }
 
 std::wstring EditView::GetText() {
-    const int length = edit_.GetWindowTextLength();
-    std::wstring text(static_cast<size_t>(length) + 1, L'\0');
-    if (length > 0) {
-        edit_.GetWindowText(text.data(), length + 1);
-    }
-    text.resize(static_cast<size_t>(length));
-    return text;
+    return std::wstring(LockText().View());
 }
 
 void EditView::MoveCaretToEnd() {

@@ -12,9 +12,9 @@ CAppModule _Module;
 namespace notepadxp::app {
 
 int Application::Run(const wchar_t* commandLine, int showCmd) {
-    // Common dialogs and shell drag-drop expect an initialized COM apartment.
-    const HRESULT comInit = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    AtlInitCommonControls(ICC_WIN95_CLASSES);  // Registers the (classic) status bar class.
+    // No CoInitializeEx: the common dialogs set COM up themselves when opened,
+    // and WM_DROPFILES needs none, so startup skips the COM runtime entirely.
+    AtlInitCommonControls(ICC_BAR_CLASSES);  // Only the (classic) status bar class.
     _Module.Init(nullptr, GetModuleHandleW(nullptr));
 
     int exitCode = 0;
@@ -24,9 +24,6 @@ int Application::Run(const wchar_t* commandLine, int showCmd) {
         MainFrame frame;
         if (!frame.RunSetup(parsed, showCmd)) {
             _Module.Term();
-            if (SUCCEEDED(comInit)) {
-                CoUninitialize();
-            }
             return 1;
         }
 
@@ -51,9 +48,6 @@ int Application::Run(const wchar_t* commandLine, int showCmd) {
     }
 
     _Module.Term();
-    if (SUCCEEDED(comInit)) {
-        CoUninitialize();
-    }
     return exitCode;
 }
 
