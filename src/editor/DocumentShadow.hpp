@@ -4,15 +4,15 @@
 // EN_CHANGE notifications into EditDeltas without reading the full buffer on
 // every keystroke. The subclass predicts each mutation (typed char, clipboard
 // text, EM_REPLACESEL string, single-char deletes) before the control applies
-// it; the shadow validates the prediction with length/caret arithmetic and
+// it. The shadow validates the prediction with length/caret arithmetic and
 // splices itself. Anything unpredicted (IME composition, the control's native
-// context-menu undo) falls back to one full-text diff and resync.
+// context-menu undo) falls back to a diff against the live text, splicing in
+// only the changed range.
 //
 // Lazily materialized: viewing a file costs no extra memory; the mirror is
 // allocated on the first modification attempt.
 
 #include <cstddef>
-#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -35,8 +35,8 @@ struct PendingChange {
     std::wstring inserted;  // Meaningful for ReplaceSelection only.
 };
 
-/// @brief Shadow text + delta derivation. Pure (no HWND); the owner feeds it
-///        control state and a full-text reader for the rare fallback.
+/// @brief Shadow text + delta derivation. Pure (no HWND): the owner feeds it
+///        control state and a view of the live text for the rare fallback.
 /// @threadsafety UI-thread only.
 class DocumentShadow final {
 public:
@@ -53,7 +53,7 @@ public:
         return text_;
     }
 
-    /// @brief Number of times CaptureChange had to resync via the full read.
+    /// @brief Number of times CaptureChange had to resync via the diff.
     [[nodiscard]] int FallbackCount() const noexcept {
         return fallbackCount_;
     }
@@ -73,18 +73,17 @@ public:
     /// @brief Sync a follow-tail append.
     void Append(std::wstring_view text);
 
-    /// @brief Turn the post-change control state into a delta. Fast path uses
-    ///        the pending prediction (validated by arithmetic); mismatch or an
-    ///        Unknown/absent prediction falls back to @p readFullText + diff.
-    ///        Unmaterialized: materializes via @p readFullText, returns nullopt
+    /// @brief Turn the post-change control state into a delta. The fast path
+    ///        uses the pending prediction, validated by arithmetic against
+    ///        @p liveText's length without reading its characters. A mismatch
+    ///        or an Unknown/absent prediction falls back to diffing @p liveText.
+    ///        Unmaterialized: materializes from @p liveText, returns nullopt
     ///        (that first observed change is not undoable — it cannot be
     ///        reconstructed without a pre-state).
-    std::optional<EditDelta> CaptureChange(size_t newLength, int selStart, int selEnd,
-                                           const std::function<std::wstring()>& readFullText);
+    std::optional<EditDelta> CaptureChange(int selStart, int selEnd, std::wstring_view liveText);
 
 private:
-    std::optional<EditDelta> Fallback(int selStart, int selEnd,
-                                      const std::function<std::wstring()>& readFullText);
+    std::optional<EditDelta> Fallback(int selStart, int selEnd, std::wstring_view liveText);
 
     std::wstring text_;
     bool materialized_ = false;

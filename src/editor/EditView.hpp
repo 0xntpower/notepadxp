@@ -9,6 +9,7 @@
 #include "WtlIncludes.hpp"
 #include "editor/DocumentShadow.hpp"
 #include "editor/EditKeyHandler.hpp"
+#include "editor/LockedText.hpp"
 #include "editor/UndoManager.hpp"
 #include "file/TextBuffer.hpp"
 #include "lang/Language.hpp"
@@ -63,7 +64,7 @@ public:
     void SelectAll();
 
     /// @brief Replace the current selection with @p text as a single undo unit.
-    void InsertText(std::wstring_view text) override;
+    void InsertText(const std::wstring& text) override;
 
     /// @brief Record the latest edit into the undo history (call on EN_CHANGE).
     void OnEditChanged();
@@ -76,10 +77,15 @@ public:
     void Reset() override;
 
     /// @brief Replace all text with @p text, clear the modify flag, home the caret.
-    void SetText(std::wstring_view text) override;
+    void SetText(const std::wstring& text) override;
 
-    /// @brief Return the full document text.
+    /// @brief Return a copy of the full document text.
     [[nodiscard]] std::wstring GetText() override;
+
+    /// @brief Zero-copy view of the document. Release it before editing.
+    [[nodiscard]] LockedText LockText() const {
+        return LockedText(edit_.m_hWnd);
+    }
 
     /// @brief Move the caret to end of buffer and scroll into view (.LOG stamp).
     void MoveCaretToEnd() override;

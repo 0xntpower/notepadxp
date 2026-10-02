@@ -2,6 +2,9 @@
 
 #include <cwctype>
 #include <string>
+#include <string_view>
+
+#include "editor/LockedText.hpp"
 
 namespace notepadxp::editor {
 
@@ -17,18 +20,6 @@ bool IsAltDown() {
 
 bool IsSpace(wchar_t ch) {
     return std::iswspace(static_cast<wint_t>(ch)) != 0;
-}
-
-// The full control text; selection indices from EM_GETSEL are offsets into this
-// buffer (the trailing CR/LF of each line are counted, matching GetWindowText).
-std::wstring ControlText(CEdit& edit) {
-    const int length = edit.GetWindowTextLength();
-    std::wstring text(static_cast<size_t>(length) + 1, L'\0');
-    if (length > 0) {
-        edit.GetWindowText(text.data(), length + 1);
-    }
-    text.resize(static_cast<size_t>(length));
-    return text;
 }
 
 } // namespace
@@ -220,14 +211,18 @@ void EditKeyHandler::DeleteWordLeft() {
     }
 
     // The deletion crosses the line break (or the prefix is all whitespace):
-    // the generic whole-text path handles it.
-    const std::wstring text = ControlText(edit);
+    // the generic whole-text path handles it. Selection indices are offsets
+    // into the buffer, CR/LF included. The lock ends before the edit.
     int boundary = start;
-    while (boundary > 0 && IsSpace(text[static_cast<size_t>(boundary) - 1])) {
-        --boundary;  // skip the whitespace run (including any line break)
-    }
-    while (boundary > 0 && !IsSpace(text[static_cast<size_t>(boundary) - 1])) {
-        --boundary;  // skip the word
+    {
+        const LockedText live(m_hWnd);
+        const std::wstring_view text = live.View();
+        while (boundary > 0 && IsSpace(text[static_cast<size_t>(boundary) - 1])) {
+            --boundary;  // skip the whitespace run (including any line break)
+        }
+        while (boundary > 0 && !IsSpace(text[static_cast<size_t>(boundary) - 1])) {
+            --boundary;  // skip the word
+        }
     }
     edit.SetSel(boundary, start);
     edit.ReplaceSel(L"", TRUE);
@@ -273,17 +268,20 @@ void EditKeyHandler::DeleteWordRight() {
         }
     }
 
-    const std::wstring text = ControlText(edit);
-    const int length = static_cast<int>(text.size());
-    if (start >= length) {
-        return;
-    }
     int boundary = start;
-    while (boundary < length && !IsSpace(text[static_cast<size_t>(boundary)])) {
-        ++boundary;  // skip the word
-    }
-    while (boundary < length && IsSpace(text[static_cast<size_t>(boundary)])) {
-        ++boundary;  // skip the trailing whitespace run
+    {
+        const LockedText live(m_hWnd);  // Released before the edit below.
+        const std::wstring_view text = live.View();
+        const int length = static_cast<int>(text.size());
+        if (start >= length) {
+            return;
+        }
+        while (boundary < length && !IsSpace(text[static_cast<size_t>(boundary)])) {
+            ++boundary;  // skip the word
+        }
+        while (boundary < length && IsSpace(text[static_cast<size_t>(boundary)])) {
+            ++boundary;  // skip the trailing whitespace run
+        }
     }
     edit.SetSel(start, boundary);
     edit.ReplaceSel(L"", TRUE);

@@ -1,9 +1,29 @@
 #include "editor/DocumentShadow.hpp"
 
 #include <algorithm>
+#include <cwchar>
 #include <utility>
 
 namespace notepadxp::editor {
+
+namespace {
+
+// Length of the common suffix of @p a and @p b, at most @p limit. Compared in
+// wmemcmp blocks: reverse iterators would defeat the STL's vectorized compare.
+size_t CommonSuffix(std::wstring_view a, std::wstring_view b, size_t limit) {
+    constexpr size_t kBlock = 4096;
+    size_t n = 0;
+    while (n + kBlock <= limit && wmemcmp(a.data() + a.size() - n - kBlock,
+                                          b.data() + b.size() - n - kBlock, kBlock) == 0) {
+        n += kBlock;
+    }
+    while (n < limit && a[a.size() - n - 1] == b[b.size() - n - 1]) {
+        ++n;
+    }
+    return n;
+}
+
+} // namespace
 
 void DocumentShadow::Reset() {
     text_.clear();
@@ -33,11 +53,10 @@ void DocumentShadow::Append(std::wstring_view text) {
     }
 }
 
-std::optional<EditDelta> DocumentShadow::CaptureChange(
-    size_t newLength, int selStart, int selEnd,
-    const std::function<std::wstring()>& readFullText) {
+std::optional<EditDelta> DocumentShadow::CaptureChange(int selStart, int selEnd,
+                                                       std::wstring_view liveText) {
     if (!materialized_) {
-        Materialize(readFullText());
+        Materialize(std::wstring(liveText));
         pending_.reset();
         return std::nullopt;
     }
@@ -45,8 +64,9 @@ std::optional<EditDelta> DocumentShadow::CaptureChange(
     const std::optional<PendingChange> pending = std::move(pending_);
     pending_.reset();
     if (!pending.has_value() || pending->kind == PendingChange::Kind::Unknown) {
-        return Fallback(selStart, selEnd, readFullText);
+        return Fallback(selStart, selEnd, liveText);
     }
+    const size_t newLength = liveText.size();
 
     // Normalize the three predicted kinds into one removed-range + insert.
     size_t pos = 0;
@@ -87,7 +107,7 @@ std::optional<EditDelta> DocumentShadow::CaptureChange(
                        selStart == selEnd &&
                        static_cast<size_t>(selStart) == expectedCaret;
     if (!valid) {
-        return Fallback(selStart, selEnd, readFullText);
+        return Fallback(selStart, selEnd, liveText);
     }
 
     EditDelta delta;
@@ -106,40 +126,33 @@ std::optional<EditDelta> DocumentShadow::CaptureChange(
     return delta;
 }
 
-std::optional<EditDelta> DocumentShadow::Fallback(
-    int selStart, int selEnd, const std::function<std::wstring()>& readFullText) {
+std::optional<EditDelta> DocumentShadow::Fallback(int selStart, int selEnd,
+                                                  std::wstring_view liveText) {
     ++fallbackCount_;
-    std::wstring fullText = readFullText();
 
-    size_t prefix = 0;
-    const size_t shared = std::min(text_.size(), fullText.size());
-    while (prefix < shared && text_[prefix] == fullText[prefix]) {
-        ++prefix;
-    }
-    size_t oldEnd = text_.size();
-    size_t newEnd = fullText.size();
-    while (oldEnd > prefix && newEnd > prefix && text_[oldEnd - 1] == fullText[newEnd - 1]) {
-        --oldEnd;
-        --newEnd;
+    const size_t shared = std::min(text_.size(), liveText.size());
+    const size_t prefix = static_cast<size_t>(
+        std::mismatch(text_.data(), text_.data() + shared, liveText.data()).first - text_.data());
+    const size_t suffix = CommonSuffix(text_, liveText, shared - prefix);
+    const size_t oldEnd = text_.size() - suffix;
+    const size_t newEnd = liveText.size() - suffix;
+    if (oldEnd == prefix && newEnd == prefix) {
+        return std::nullopt;
     }
 
-    std::optional<EditDelta> delta;
-    if (oldEnd != prefix || newEnd != prefix) {
-        EditDelta d;
-        d.pos = prefix;
-        d.removed = text_.substr(prefix, oldEnd - prefix);
-        d.inserted = fullText.substr(prefix, newEnd - prefix);
-        d.charBeforePos = prefix > 0 ? fullText[prefix - 1] : L'\0';
-        // The pre-change selection is unknown on this path; anchor undo's
-        // restore point at the change site instead.
-        d.selStartBefore = static_cast<int>(prefix);
-        d.selEndBefore = static_cast<int>(prefix + (oldEnd - prefix));
-        d.selStartAfter = selStart;
-        d.selEndAfter = selEnd;
-        delta = std::move(d);
-    }
-    text_ = std::move(fullText);
-    return delta;
+    EditDelta d;
+    d.pos = prefix;
+    d.removed = text_.substr(prefix, oldEnd - prefix);
+    d.inserted = liveText.substr(prefix, newEnd - prefix);
+    d.charBeforePos = prefix > 0 ? liveText[prefix - 1] : L'\0';
+    // The pre-change selection is unknown on this path: anchor undo's restore
+    // point at the change site instead.
+    d.selStartBefore = static_cast<int>(prefix);
+    d.selEndBefore = static_cast<int>(oldEnd);
+    d.selStartAfter = selStart;
+    d.selEndAfter = selEnd;
+    text_.replace(prefix, oldEnd - prefix, d.inserted);
+    return d;
 }
 
 } // namespace notepadxp::editor

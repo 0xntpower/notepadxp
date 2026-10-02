@@ -256,7 +256,7 @@ public:
         text.clear();
         modified = false;
     }
-    void SetText(std::wstring_view t) override {
+    void SetText(const std::wstring& t) override {
         text = t;
         modified = false;
     }
@@ -273,7 +273,7 @@ public:
         modified = m;
     }
     void MoveCaretToEnd() override {}
-    void InsertText(std::wstring_view t) override {
+    void InsertText(const std::wstring& t) override {
         text += t;
         modified = true;
     }
@@ -1123,15 +1123,15 @@ void TestDocumentShadow() {
     using notepadxp::editor::DocumentShadow;
     using Kind = notepadxp::editor::PendingChange::Kind;
 
-    // A reader that must not be consulted on the fast path: returns a poison
-    // value that would corrupt the shadow if the fallback ran.
-    const std::function<std::wstring()> poison = [] { return std::wstring(L"POISON"); };
+    // The fast path checks only the live text's length, never its characters.
+    // A same-length poison view would corrupt the shadow if the diff ran.
+    const auto poison = [](size_t length) { return std::wstring(length, L'#'); };
 
     // Unmaterialized capture: materializes, yields no delta.
     {
         DocumentShadow s;
         CHECK(!s.IsMaterialized());
-        CHECK(!s.CaptureChange(5, 5, 5, [] { return std::wstring(L"hello"); }).has_value());
+        CHECK(!s.CaptureChange(5, 5, L"hello").has_value());
         CHECK(s.IsMaterialized());
         CHECK(s.Text() == L"hello");
         CHECK(s.FallbackCount() == 0);
@@ -1142,7 +1142,7 @@ void TestDocumentShadow() {
         DocumentShadow s;
         s.Materialize(L"hello");
         s.SetPending(Pending(Kind::ReplaceSelection, 5, 5, L"X"));
-        const auto d = s.CaptureChange(6, 6, 6, poison);
+        const auto d = s.CaptureChange(6, 6, poison(6));
         CHECK(d.has_value());
         CHECK(d->pos == 5);
         CHECK(d->inserted == L"X");
@@ -1157,7 +1157,7 @@ void TestDocumentShadow() {
         DocumentShadow s;
         s.Materialize(L"hello");
         s.SetPending(Pending(Kind::ReplaceSelection, 0, 5, L"Hi"));
-        const auto d = s.CaptureChange(2, 2, 2, poison);
+        const auto d = s.CaptureChange(2, 2, poison(2));
         CHECK(d.has_value());
         CHECK(d->removed == L"hello");
         CHECK(d->inserted == L"Hi");
@@ -1169,12 +1169,12 @@ void TestDocumentShadow() {
         DocumentShadow s;
         s.Materialize(L"hello");
         s.SetPending(Pending(Kind::BackspaceOne, 5, 5));
-        const auto d = s.CaptureChange(4, 4, 4, poison);
+        const auto d = s.CaptureChange(4, 4, poison(4));
         CHECK(d.has_value());
         CHECK(d->pos == 4);
         CHECK(d->removed == L"o");
         s.SetPending(Pending(Kind::BackspaceOne, 1, 3));
-        const auto d2 = s.CaptureChange(2, 1, 1, poison);
+        const auto d2 = s.CaptureChange(1, 1, poison(2));
         CHECK(d2.has_value());
         CHECK(d2->pos == 1);
         CHECK(d2->removed == L"el");
@@ -1186,7 +1186,7 @@ void TestDocumentShadow() {
         DocumentShadow s;
         s.Materialize(L"hello");
         s.SetPending(Pending(Kind::DeleteOne, 0, 0));
-        const auto d = s.CaptureChange(4, 0, 0, poison);
+        const auto d = s.CaptureChange(0, 0, poison(4));
         CHECK(d.has_value());
         CHECK(d->pos == 0);
         CHECK(d->removed == L"h");
@@ -1198,7 +1198,7 @@ void TestDocumentShadow() {
         DocumentShadow s;
         s.Materialize(L"abcdef");
         s.SetPending(Pending(Kind::ReplaceSelection, 2, 4, L"XY\r\nZ"));
-        const auto d = s.CaptureChange(9, 7, 7, poison);
+        const auto d = s.CaptureChange(7, 7, poison(9));
         CHECK(d.has_value());
         CHECK(d->removed == L"cd");
         CHECK(d->inserted == L"XY\r\nZ");
@@ -1211,7 +1211,7 @@ void TestDocumentShadow() {
         DocumentShadow s;
         s.Materialize(L"abc");
         s.SetPending(Pending(Kind::ReplaceSelection, 0, 0, L"Q"));
-        const auto d = s.CaptureChange(7, 7, 7, [] { return std::wstring(L"abcdefg"); });
+        const auto d = s.CaptureChange(7, 7, L"abcdefg");
         CHECK(d.has_value());
         CHECK(d->pos == 3);
         CHECK(d->inserted == L"defg");
@@ -1224,11 +1224,37 @@ void TestDocumentShadow() {
         DocumentShadow s;
         s.Materialize(L"abc");
         s.SetPending(Pending(Kind::Unknown, 0, 0));
-        CHECK(s.CaptureChange(4, 4, 4, [] { return std::wstring(L"abcd"); }).has_value());
+        CHECK(s.CaptureChange(4, 4, L"abcd").has_value());
         CHECK(s.FallbackCount() == 1);
-        CHECK(s.CaptureChange(5, 5, 5, [] { return std::wstring(L"abcde"); }).has_value());
+        CHECK(s.CaptureChange(5, 5, L"abcde").has_value());
         CHECK(s.FallbackCount() == 2);
         CHECK(s.Text() == L"abcde");
+    }
+
+    // The fallback diff across block-sized runs, and an ambiguous repeat.
+    {
+        std::wstring before(10000, L'a');
+        before[2] = L'x';
+        before[9990] = L'y';
+        std::wstring after = before;
+        after.replace(5000, 1, L"QRS");
+        DocumentShadow s;
+        s.Materialize(before);
+        const auto d = s.CaptureChange(5003, 5003, after);
+        CHECK(d.has_value());
+        CHECK(d->pos == 5000);
+        CHECK(d->removed == L"a");
+        CHECK(d->inserted == L"QRS");
+        CHECK(s.Text() == after);
+
+        DocumentShadow r;
+        r.Materialize(L"aaaa");
+        const auto d2 = r.CaptureChange(5, 5, L"aaaaa");
+        CHECK(d2.has_value());
+        CHECK(d2->pos == 4);
+        CHECK(d2->inserted == L"a");
+        CHECK(d2->removed.empty());
+        CHECK(r.Text() == L"aaaaa");
     }
 
     // Pasting text identical to the selection records nothing.
@@ -1236,7 +1262,7 @@ void TestDocumentShadow() {
         DocumentShadow s;
         s.Materialize(L"abc");
         s.SetPending(Pending(Kind::ReplaceSelection, 0, 3, L"abc"));
-        CHECK(!s.CaptureChange(3, 3, 3, poison).has_value());
+        CHECK(!s.CaptureChange(3, 3, poison(3)).has_value());
         CHECK(s.FallbackCount() == 0);
         CHECK(s.Text() == L"abc");
     }

@@ -202,9 +202,8 @@ void MainFrame::OnCommand(UINT notifyCode, int id, CWindow /*control*/) {
             int selStart = 0;
             int selEnd = 0;
             editView_.GetSelection(selStart, selEnd);
-            const std::wstring text = editView_.GetText();
             const auto match = lang::FindMatchingBrace(
-                text, static_cast<size_t>(selStart),
+                editView_.LockText().View(), static_cast<size_t>(selStart),
                 lang::TraitsFor(fileService_.Document().language));
             if (match.has_value()) {
                 editView_.SelectRange(static_cast<int>(*match), static_cast<int>(*match) + 1);
@@ -221,9 +220,8 @@ void MainFrame::OnCommand(UINT notifyCode, int id, CWindow /*control*/) {
             int startChar = 0;
             int endChar = 0;
             editView_.ExpandSelectionToLines(startChar, endChar);
-            const std::wstring text = editView_.GetText();
-            const std::wstring block = text.substr(
-                static_cast<size_t>(startChar), static_cast<size_t>(endChar - startChar));
+            const std::wstring block(editView_.LockText().View().substr(
+                static_cast<size_t>(startChar), static_cast<size_t>(endChar - startChar)));
             const std::wstring toggled = lang::ToggleLineComments(block, traits);
             if (toggled != block) {
                 editView_.SelectRange(startChar, endChar);
@@ -244,11 +242,16 @@ void MainFrame::OnCommand(UINT notifyCode, int id, CWindow /*control*/) {
             break;
         case M_JSONPRETTY:
         case M_JSONMINIFY: {
-            const std::wstring text = editView_.GetText();
-            const lang::JsonResult result =
-                id == M_JSONPRETTY
-                    ? lang::PrettyPrintJson(text, fileService_.Document().indentStyle)
-                    : lang::MinifyJson(text);
+            lang::JsonResult result;
+            bool changed = false;
+            {
+                const editor::LockedText text = editView_.LockText();  // Read in place.
+                result = id == M_JSONPRETTY
+                             ? lang::PrettyPrintJson(text.View(),
+                                                     fileService_.Document().indentStyle)
+                             : lang::MinifyJson(text.View());
+                changed = result.ok && result.text != text.View();
+            }
             if (!result.ok) {
                 wchar_t message[128] = {0};
                 _snwprintf_s(message, _TRUNCATE, util::LoadStr(IDS_JSONERR).c_str(),
@@ -260,7 +263,7 @@ void MainFrame::OnCommand(UINT notifyCode, int id, CWindow /*control*/) {
                 editView_.SetFocusToEdit();
                 break;
             }
-            if (result.text != text) {
+            if (changed) {
                 editView_.SelectAll();
                 editView_.InsertText(result.text);  // One undo unit.
             }
