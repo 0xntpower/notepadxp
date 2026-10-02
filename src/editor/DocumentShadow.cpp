@@ -30,6 +30,7 @@ void DocumentShadow::Reset() {
     text_.shrink_to_fit();
     materialized_ = false;
     pending_.reset();
+    staged_.reset();
 }
 
 void DocumentShadow::Materialize(std::wstring fullText) {
@@ -39,6 +40,9 @@ void DocumentShadow::Materialize(std::wstring fullText) {
 
 void DocumentShadow::SetPending(PendingChange pending) {
     pending_ = std::move(pending);
+    // A new mutation means a staged delete's insert half never arrived. The
+    // mirror already holds the delete, which then simply has no undo unit.
+    staged_.reset();
 }
 
 void DocumentShadow::ApplyExternal(size_t pos, size_t removedLen, std::wstring_view inserted) {
@@ -61,8 +65,10 @@ std::optional<EditDelta> DocumentShadow::CaptureChange(int selStart, int selEnd,
         return std::nullopt;
     }
 
-    const std::optional<PendingChange> pending = std::move(pending_);
+    std::optional<PendingChange> pending = std::move(pending_);
     pending_.reset();
+    const std::optional<StagedDelete> staged = std::move(staged_);
+    staged_.reset();
     if (!pending.has_value() || pending->kind == PendingChange::Kind::Unknown) {
         return Fallback(selStart, selEnd, liveText);
     }
@@ -97,6 +103,21 @@ std::optional<EditDelta> DocumentShadow::CaptureChange(int selStart, int selEnd,
             break;
     }
 
+    // Replacing a non-empty selection with text arrives as two EN_CHANGEs:
+    // the delete, then the insert. On the delete, mirror it and keep the
+    // prediction for the insert, which then completes a single delta.
+    if (pending->kind == PendingChange::Kind::ReplaceSelection && removedLen > 0 &&
+        !inserted.empty() && pos + removedLen <= text_.size() &&
+        newLength == text_.size() - removedLen && selStart == selEnd &&
+        static_cast<size_t>(selStart) == pos) {
+        staged_ = StagedDelete{pos, text_.substr(pos, removedLen), pending->selStart,
+                               pending->selEnd};
+        text_.erase(pos, removedLen);
+        pending->selEnd = pending->selStart;
+        pending_ = std::move(pending);
+        return std::nullopt;
+    }
+
     // Validate the prediction against the observed post-change state; any
     // mismatch (stale pending, control-side truncation, unpredicted path)
     // means the prediction is not trusted.
@@ -114,15 +135,21 @@ std::optional<EditDelta> DocumentShadow::CaptureChange(int selStart, int selEnd,
     delta.pos = pos;
     delta.removed = text_.substr(pos, removedLen);
     delta.inserted = inserted;
-    if (delta.removed == delta.inserted) {
-        return std::nullopt;  // Textual no-op (e.g. pasting over an identical selection).
-    }
     delta.charBeforePos = pos > 0 ? text_[pos - 1] : L'\0';
     delta.selStartBefore = pending->selStart;
     delta.selEndBefore = pending->selEnd;
     delta.selStartAfter = selStart;
     delta.selEndAfter = selEnd;
+    if (staged.has_value() && staged->pos == pos && removedLen == 0) {
+        // The insert half of a staged selection replace: one delta for both.
+        delta.removed = staged->removed;
+        delta.selStartBefore = staged->selStart;
+        delta.selEndBefore = staged->selEnd;
+    }
     text_.replace(pos, removedLen, inserted);
+    if (delta.removed == delta.inserted) {
+        return std::nullopt;  // Textual no-op (e.g. pasting over an identical selection).
+    }
     return delta;
 }
 

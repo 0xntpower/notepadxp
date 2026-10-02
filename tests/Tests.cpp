@@ -1193,6 +1193,32 @@ void TestDocumentShadow() {
         CHECK(s.Text() == L"Hi");
     }
 
+    // The control reports a selection replace as two changes, the delete and
+    // then the insert. They must still make one delta and never fall back.
+    {
+        DocumentShadow s;
+        s.Materialize(L"hello world");
+        s.SetPending(Pending(Kind::ReplaceSelection, 0, 5, L"HELLO"));
+        CHECK(!s.CaptureChange(0, 0, poison(6)).has_value());  // Delete half.
+        CHECK(s.Text() == L" world");
+        const auto d = s.CaptureChange(5, 5, poison(11));        // Insert half.
+        CHECK(d.has_value());
+        CHECK(d->pos == 0);
+        CHECK(d->removed == L"hello");
+        CHECK(d->inserted == L"HELLO");
+        CHECK(d->selStartBefore == 0);
+        CHECK(d->selEndBefore == 5);
+        CHECK(s.Text() == L"HELLO world");
+        CHECK(s.FallbackCount() == 0);
+
+        // Pasting identical text over the selection: two halves, no delta.
+        s.SetPending(Pending(Kind::ReplaceSelection, 0, 5, L"HELLO"));
+        CHECK(!s.CaptureChange(0, 0, poison(6)).has_value());
+        CHECK(!s.CaptureChange(5, 5, poison(11)).has_value());
+        CHECK(s.Text() == L"HELLO world");
+        CHECK(s.FallbackCount() == 0);
+    }
+
     // Backspace, with and without a selection.
     {
         DocumentShadow s;

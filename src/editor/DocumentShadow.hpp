@@ -83,11 +83,22 @@ public:
     std::optional<EditDelta> CaptureChange(int selStart, int selEnd, std::wstring_view liveText);
 
 private:
+    // The delete half of a selection replace, awaiting its insert half: the
+    // control reports replacing a non-empty selection with text as two
+    // EN_CHANGEs, which must still become one delta (one undo unit).
+    struct StagedDelete {
+        size_t pos = 0;
+        std::wstring removed;
+        int selStart = 0;
+        int selEnd = 0;
+    };
+
     std::optional<EditDelta> Fallback(int selStart, int selEnd, std::wstring_view liveText);
 
     std::wstring text_;
     bool materialized_ = false;
     std::optional<PendingChange> pending_;
+    std::optional<StagedDelete> staged_;
     int fallbackCount_ = 0;
 };
 
