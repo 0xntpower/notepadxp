@@ -9,6 +9,20 @@
 #ifndef NOTEPADXP_RESOURCE_H
 #define NOTEPADXP_RESOURCE_H
 
+// --- Version ---------------------------------------------------------------
+// The one place the version is set. Notepad.rc builds VERSIONINFO from it and
+// the About box shows NOTEPADXP_VERSION_STRING ("0.1.0").
+#define NOTEPADXP_VERSION_MAJOR 0
+#define NOTEPADXP_VERSION_MINOR 1
+#define NOTEPADXP_VERSION_PATCH 0
+
+#define NOTEPADXP_STRINGIZE_(x) #x
+#define NOTEPADXP_STRINGIZE(x)  NOTEPADXP_STRINGIZE_(x)
+#define NOTEPADXP_VERSION_STRING                                                 \
+    NOTEPADXP_STRINGIZE(NOTEPADXP_VERSION_MAJOR) "."                             \
+    NOTEPADXP_STRINGIZE(NOTEPADXP_VERSION_MINOR) "."                             \
+    NOTEPADXP_STRINGIZE(NOTEPADXP_VERSION_PATCH)
+
 // --- Icons -----------------------------------------------------------------
 #define ID_APPICON              1     // Application icon (Explorer requires id == 1).
 #define ID_ICON                 2     // Main window icon.
@@ -72,6 +86,7 @@
 #define IDC_GOTO                258   // Go To line-number edit.
 #define IDC_ENCODING            259   // "Encoding:" static label.
 #define IDC_GOTO_LABEL          1200  // "Line Number:" static label.
+#define IDC_ABOUT_VERSION       1201  // About box version line, set at runtime.
 // Abort-print dialog.
 #define ID_FILENAME             20
 #define ID_PAGENUMBER           21

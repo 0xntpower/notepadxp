@@ -6,11 +6,12 @@ namespace notepadxp::dialogs {
 
 namespace {
 
-// Static "About NotepadXP" box (IDD_ABOUT): the template carries all the text
-// and the application icon, so the proc only needs to close on OK/Cancel.
+// Static "About NotepadXP" box (IDD_ABOUT): the template carries the icon and
+// the fixed text. The proc fills in the version and closes on OK/Cancel.
 INT_PTR CALLBACK AboutProc(HWND dialog, UINT message, WPARAM wParam, LPARAM /*lParam*/) {
     switch (message) {
         case WM_INITDIALOG:
+            SetDlgItemTextW(dialog, IDC_ABOUT_VERSION, L"Version " NOTEPADXP_VERSION_STRING);
             return TRUE;
         case WM_COMMAND:
             if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL) {

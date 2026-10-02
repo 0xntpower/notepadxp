@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity
-      type="win32"
-      name="NotepadXP.Notepad"
-      version="1.0.0.0"
-      processorArchitecture="amd64"/>
+  <!--
+    No assemblyIdentity: this file cannot read the version from Resource.h, and
+    an .exe's own manifest does not need one (the linker's generated manifests
+    omit it too). The version lives only in Resource.h.
+  -->
 
   <!--
     NOTE: There is deliberately NO dependency on Microsoft.Windows.Common-Controls
