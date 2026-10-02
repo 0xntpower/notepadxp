@@ -387,6 +387,7 @@ function New-Corpus {
     $files['code.py'] = @{ Text = (New-Text $py 150KB "`n"); Enc = [Text.UTF8Encoding]::new($false) }
     $cpp = "int Handler#(const Event& e) {`r`n    // Route the event.`r`n    if (e.kind == Kind::X) {`r`n        return Call({1, 2}, [&] { return e.n; });`r`n    }`r`n    return 0;`r`n}"
     $files['code.cpp'] = @{ Text = (New-Text $cpp 150KB "`r`n"); Enc = $ascii }
+    $files['outer.cpp'] = @{ Text = "{`r`n" + (New-Text $cpp 1MB "`r`n") + "}`r`n"; Enc = $ascii }
 
     $files['journal.txt'] = @{ Text = ".LOG`r`n" + (New-Text $log 20KB "`r`n"); Enc = $ascii }
     $files['nul.txt'] = @{ Text = "before`0after`0`0end`r`n" + (New-Text $log 20KB "`r`n"); Enc = $ascii }
@@ -415,6 +416,25 @@ function Invoke-Training {
     Invoke-Session (Join-Path $work 'code.py') @{ Find = 'event'; ReplaceWith = 'evt'; Code = $true }
     Invoke-Session (Join-Path $work 'code.cpp') @{ Find = 'Handler'; ReplaceWith = 'Route'; Code = $true; Wrap = $true }
     Invoke-Session (Join-Path $work 'nul.txt') $plain
+
+    # Whole-document scans. Functions the training leaves cold are compiled
+    # for size, so the long paths must be trained, not just the short ones.
+    Write-Host '[pgo]   outer.cpp (whole-file brace match, comment toggle, diff)'
+    $app = Start-App (Join-Path $work 'outer.cpp')
+    $length = Get-Length $app
+    foreach ($i in 1..4) {
+        Set-Selection $app 0 0                           # Outer '{': scans to the end.
+        Invoke-Command $app $cmd.MatchBrace
+        Set-Selection $app ($length - 2) ($length - 2)   # After the outer '}'.
+        Invoke-Command $app $cmd.MatchBrace
+    }
+    Invoke-Command $app $cmd.SelectAll
+    Invoke-Command $app $cmd.ToggleComment
+    Invoke-Command $app $cmd.SelectAll
+    Invoke-Command $app $cmd.ToggleComment
+    [void](Send-Message $app.Edit 0x00C7)               # EM_UNDO: the shadow's fallback diff.
+    Invoke-Command $app $cmd.Save
+    Stop-App $app
 
     Write-Host '[pgo]   journal.txt (.LOG), new document'
     $app = Start-App (Join-Path $work 'journal.txt')     # Timestamp appended on open.
