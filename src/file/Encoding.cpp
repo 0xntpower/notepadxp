@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>  // _byteswap_ushort.
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -33,40 +35,35 @@ const char* AsChars(const std::byte* data) {
     return reinterpret_cast<const char*>(data);
 }
 
-// Replace embedded NUL code units with spaces, in place.
+// Replace embedded NUL code units with spaces, in place. The search is
+// vectorized, so the usual no-NUL file costs one fast scan and no writes.
 void NullsToSpaces(std::wstring& text) {
-    for (wchar_t& ch : text) {
-        if (ch == L'\0') {
-            ch = L' ';
-        }
+    for (size_t i = text.find(L'\0'); i != std::wstring::npos; i = text.find(L'\0', i + 1)) {
+        text[i] = L' ';
     }
 }
 
 std::wstring DecodeCodePage(const std::byte* data, size_t size, UINT codePage) {
-    if (size == 0) {
-        return std::wstring{};
-    }
+    // UTF-8 and every ANSI code page decode to at most one UTF-16 unit per
+    // byte, so the byte count bounds the output: convert once, then trim.
     const int byteCount = static_cast<int>(size);
-    const int wideCount =
-        MultiByteToWideChar(codePage, 0, AsChars(data), byteCount, nullptr, 0);
-    if (wideCount <= 0) {
-        return std::wstring{};
-    }
-    std::wstring text(static_cast<size_t>(wideCount), L'\0');
-    MultiByteToWideChar(codePage, 0, AsChars(data), byteCount, text.data(), wideCount);
+    std::wstring text(size, L'\0');
+    const int wideCount = size == 0 ? 0
+                                    : MultiByteToWideChar(codePage, 0, AsChars(data), byteCount,
+                                                          text.data(), byteCount);
+    text.resize(wideCount > 0 ? static_cast<size_t>(wideCount) : 0);
     NullsToSpaces(text);
     return text;
 }
 
 std::wstring DecodeUtf16(const std::byte* data, size_t size, bool bigEndian) {
-    const size_t count = size / sizeof(wchar_t);
-    std::wstring text(count, L'\0');
-    for (size_t i = 0; i < count; ++i) {
-        const auto low = static_cast<uint16_t>(data[i * 2]);
-        const auto high = static_cast<uint16_t>(data[i * 2 + 1]);
-        const uint16_t unit = bigEndian ? static_cast<uint16_t>((low << 8) | high)
-                                        : static_cast<uint16_t>((high << 8) | low);
-        text[i] = static_cast<wchar_t>(unit);
+    // x64 is little-endian: LE is a straight copy, BE a per-unit byte swap.
+    std::wstring text(size / sizeof(wchar_t), L'\0');
+    std::memcpy(text.data(), data, text.size() * sizeof(wchar_t));
+    if (bigEndian) {
+        for (wchar_t& unit : text) {
+            unit = static_cast<wchar_t>(_byteswap_ushort(static_cast<unsigned short>(unit)));
+        }
     }
     NullsToSpaces(text);
     return text;
@@ -94,6 +91,21 @@ bool IsTextUtf8(const std::byte* data, size_t size) {
     bool allAscii = true;
 
     for (size_t i = 0; i < size; ++i) {
+        if (octetsToGo == 0) {
+            // Between sequences, skip 8 ASCII bytes at a time (no high bit set).
+            constexpr uint64_t kHighBits = 0x8080808080808080ULL;
+            while (i + sizeof(uint64_t) <= size) {
+                uint64_t chunk = 0;
+                std::memcpy(&chunk, data + i, sizeof(chunk));
+                if ((chunk & kHighBits) != 0) {
+                    break;
+                }
+                i += sizeof(chunk);
+            }
+            if (i == size) {
+                break;
+            }
+        }
         auto ch = static_cast<uint8_t>(data[i]);
         if ((ch & kHighBit) != 0) {
             allAscii = false;
@@ -178,23 +190,22 @@ std::vector<std::byte> EncodeText(std::wstring_view text, TextEncoding encoding,
     std::vector<std::byte> out;
 
     switch (encoding) {
-        case TextEncoding::Utf16Le: {
-            out.push_back(kUtf16LeBom0);
-            out.push_back(kUtf16LeBom1);
-            for (const wchar_t ch : text) {
-                const auto unit = static_cast<uint16_t>(ch);
-                out.push_back(static_cast<std::byte>(unit & 0xFF));
-                out.push_back(static_cast<std::byte>((unit >> 8) & 0xFF));
-            }
-            return out;
-        }
+        case TextEncoding::Utf16Le:
         case TextEncoding::Utf16Be: {
-            out.push_back(kUtf16BeBom0);
-            out.push_back(kUtf16BeBom1);
-            for (const wchar_t ch : text) {
-                const auto unit = static_cast<uint16_t>(ch);
-                out.push_back(static_cast<std::byte>((unit >> 8) & 0xFF));
-                out.push_back(static_cast<std::byte>(unit & 0xFF));
+            // x64 is little-endian: LE is a straight copy, BE a per-unit swap.
+            const bool bigEndian = encoding == TextEncoding::Utf16Be;
+            out.resize(kUtf16BomLength + text.size() * sizeof(wchar_t));
+            out[0] = bigEndian ? kUtf16BeBom0 : kUtf16LeBom0;
+            out[1] = bigEndian ? kUtf16BeBom1 : kUtf16LeBom1;
+            std::byte* units = out.data() + kUtf16BomLength;
+            if (bigEndian) {
+                for (size_t i = 0; i < text.size(); ++i) {
+                    const unsigned short unit =
+                        _byteswap_ushort(static_cast<unsigned short>(text[i]));
+                    std::memcpy(units + i * sizeof(unit), &unit, sizeof(unit));
+                }
+            } else {
+                std::memcpy(units, text.data(), text.size() * sizeof(wchar_t));
             }
             return out;
         }
@@ -224,27 +235,32 @@ std::vector<std::byte> EncodeText(std::wstring_view text, TextEncoding encoding,
             }
             const int len = static_cast<int>(text.size());
 
-            // Output bytes use best-fit mapping (dwFlags == 0), matching what the
-            // classic Notepad writes once the user accepts a lossy save.
+            // Size for best-fit output (dwFlags == 0), what classic Notepad writes
+            // once the user accepts a lossy save.
             const int needed =
                 WideCharToMultiByte(CP_ACP, 0, text.data(), len, nullptr, 0, nullptr, nullptr);
-            if (needed > 0) {
-                out.resize(static_cast<size_t>(needed));
-                WideCharToMultiByte(CP_ACP, 0, text.data(), len,
-                                    reinterpret_cast<char*>(out.data()), needed, nullptr, nullptr);
-                // reinterpret_cast: writing the converted bytes into our buffer.
+            if (needed <= 0) {
+                return out;
             }
+            out.resize(static_cast<size_t>(needed));
+            // reinterpret_cast: writing the converted bytes into our buffer.
+            auto* bytes = reinterpret_cast<char*>(out.data());
 
-            // Detect data loss with a strict (no best-fit) pass: WC_NO_BEST_FIT_CHARS
-            // makes unrepresentable characters set usedDefault.
+            // Strict pass first (WC_NO_BEST_FIT_CHARS sets usedDefault on any
+            // unrepresentable character). When nothing was lost its bytes are
+            // exactly the best-fit bytes, so the common case is one pass.
             BOOL usedDefault = FALSE;
-            const int strictNeeded = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, text.data(),
-                                                         len, nullptr, 0, nullptr, nullptr);
-            if (strictNeeded > 0) {
-                std::vector<char> scratch(static_cast<size_t>(strictNeeded));
-                WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, text.data(), len, scratch.data(),
-                                    strictNeeded, nullptr, &usedDefault);
+            int written = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, text.data(), len, bytes,
+                                              needed, nullptr, &usedDefault);
+            if (written <= 0 && GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
+                usedDefault = TRUE;  // Only default-char substitutions outgrow best-fit.
             }
+            if (written <= 0 || usedDefault != FALSE) {
+                // Lossy, or a code page that rejects the strict flags (UTF-8 ACP).
+                written = WideCharToMultiByte(CP_ACP, 0, text.data(), len, bytes, needed, nullptr,
+                                              nullptr);
+            }
+            out.resize(written > 0 ? static_cast<size_t>(written) : 0);
             lossy = usedDefault != FALSE;
             return out;
         }
