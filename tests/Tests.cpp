@@ -626,28 +626,57 @@ void TestFileService() {
 void TestSearchEngine() {
     using notepadxp::editor::FindBackward;
     using notepadxp::editor::FindForward;
-    using notepadxp::editor::MatchAt;
+    using notepadxp::editor::IsMatch;
     using notepadxp::editor::ReplaceAllInText;
     constexpr size_t npos = std::wstring::npos;
 
     const std::wstring text = L"the cat sat on the mat";
 
-    CHECK(FindForward(text, L"the", 0, true) == 0);
-    CHECK(FindForward(text, L"the", 1, true) == 15);
-    CHECK(FindForward(text, L"the", 16, true) == npos);  // No wrap-around.
-    CHECK(FindForward(text, L"THE", 0, false) == 0);     // Case-insensitive.
-    CHECK(FindForward(text, L"THE", 0, true) == npos);
-    CHECK(FindForward(text, L"", 0, true) == npos);      // Empty key never matches.
-    CHECK(FindForward(L"ab", L"abc", 0, true) == npos);  // Key longer than text.
-    CHECK(FindForward(text, L"mat", 19, true) == 19);    // Match flush at the end.
+    CHECK(FindForward(text, L"the", 0, true).pos == 0);
+    CHECK(FindForward(text, L"the", 0, true).length == 3);
+    CHECK(FindForward(text, L"the", 1, true).pos == 15);
+    CHECK(FindForward(text, L"the", 16, true).pos == npos);  // No wrap-around.
+    CHECK(FindForward(text, L"THE", 0, false).pos == 0);     // Case-insensitive.
+    CHECK(FindForward(text, L"THE", 1, false).pos == 15);
+    CHECK(FindForward(text, L"THE", 16, false).pos == npos);
+    CHECK(FindForward(text, L"THE", 0, true).pos == npos);
+    CHECK(FindForward(text, L"", 0, true).pos == npos);      // Empty key never matches.
+    CHECK(FindForward(text, L"", 0, false).pos == npos);
+    CHECK(FindForward(L"ab", L"abc", 0, true).pos == npos);  // Key longer than text.
+    CHECK(FindForward(L"ab", L"abc", 0, false).pos == npos);
+    CHECK(FindForward(text, L"mat", 19, true).pos == 19);    // Match flush at the end.
+    CHECK(FindForward(text, L"MAT", 19, false).pos == 19);
+    CHECK(FindForward(text, L"mat", text.size(), false).pos == npos);  // From the very end.
 
-    CHECK(FindBackward(text, L"the", text.size(), true) == 15);
-    CHECK(FindBackward(text, L"the", 15, true) == 0);   // Ends at/before 15.
-    CHECK(FindBackward(text, L"the", 2, true) == npos); // Nothing fits before 2.
-    CHECK(FindBackward(text, L"mat", text.size(), true) == 19);
+    CHECK(FindBackward(text, L"the", text.size(), true).pos == 15);
+    CHECK(FindBackward(text, L"the", 15, true).pos == 0);    // Ends at/before 15.
+    CHECK(FindBackward(text, L"the", 2, true).pos == npos);  // Nothing fits before 2.
+    CHECK(FindBackward(text, L"mat", text.size(), true).pos == 19);
+    CHECK(FindBackward(text, L"THE", text.size(), false).pos == 15);
+    CHECK(FindBackward(text, L"THE", 17, false).pos == 0);   // "the" at 15 ends past 17.
+    CHECK(FindBackward(text, L"THE", 2, false).pos == npos);
+    CHECK(FindBackward(text, L"THE", 0, false).pos == npos);
 
-    CHECK(MatchAt(text, 19, L"mat", true));
-    CHECK(!MatchAt(text, 20, L"mat", true));  // Would run past the end.
+    // Ignore-case matching is linguistic: a precomposed key finds the
+    // decomposed spelling, and the match length is the text's, not the key's.
+    {
+        const std::wstring decomposed = L"a café b";
+        const auto m = FindForward(decomposed, L"CAFÉ", 0, false);
+        CHECK(m.pos == 2);
+        CHECK(m.length == 5);
+        CHECK(FindBackward(decomposed, L"CAFÉ", decomposed.size(), false).length == 5);
+        const auto r = ReplaceAllInText(decomposed, L"café", L"tea", false);
+        CHECK(r.text == L"a tea b");
+        CHECK(r.count == 1);
+    }
+
+    // The selection test Replace uses, under both case rules.
+    CHECK(IsMatch(L"mat", L"mat", true));
+    CHECK(!IsMatch(L"ma", L"mat", true));
+    CHECK(!IsMatch(L"MAT", L"mat", true));
+    CHECK(IsMatch(L"MAT", L"mat", false));
+    CHECK(!IsMatch(L"", L"mat", false));
+    CHECK(IsMatch(L"café", L"CAFÉ", false));
 
     {
         const auto r = ReplaceAllInText(L"aaaa", L"aa", L"b", true);

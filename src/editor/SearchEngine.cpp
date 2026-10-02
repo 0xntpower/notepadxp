@@ -1,65 +1,76 @@
 #include "editor/SearchEngine.hpp"
 
-#include <cwchar>
-
 #include "util/WinLean.hpp"
 
 namespace notepadxp::editor {
 
-bool MatchAt(const std::wstring& text, size_t pos, std::wstring_view key, bool matchCase) {
-    if (pos + key.size() > text.size()) {
-        return false;
+namespace {
+
+// One NLS call over the whole window instead of a locale compare at every
+// position. NORM_IGNORECASE matches the comparison IsMatch uses.
+Match FindIgnoreCase(std::wstring_view window, std::wstring_view key, DWORD direction,
+                     size_t offset) {
+    if (window.empty()) {
+        return {};  // FindNLSStringEx rejects a zero-length source.
     }
+    int foundLength = 0;
+    const int pos = FindNLSStringEx(LOCALE_NAME_USER_DEFAULT, direction | NORM_IGNORECASE,
+                                    window.data(), static_cast<int>(window.size()), key.data(),
+                                    static_cast<int>(key.size()), &foundLength, nullptr, nullptr,
+                                    0);
+    if (pos < 0 || foundLength <= 0) {
+        return {};  // A zero-length (all-ignorable) match is no match.
+    }
+    return {offset + static_cast<size_t>(pos), static_cast<size_t>(foundLength)};
+}
+
+} // namespace
+
+bool IsMatch(std::wstring_view candidate, std::wstring_view key, bool matchCase) {
     if (matchCase) {
-        return wcsncmp(text.c_str() + pos, key.data(), key.size()) == 0;
+        return candidate == key;
     }
-    // Locale-aware, case-insensitive comparison.
-    return CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE, text.c_str() + pos,
-                          static_cast<int>(key.size()), key.data(),
-                          static_cast<int>(key.size())) == CSTR_EQUAL;
+    return CompareStringEx(LOCALE_NAME_USER_DEFAULT, NORM_IGNORECASE, candidate.data(),
+                           static_cast<int>(candidate.size()), key.data(),
+                           static_cast<int>(key.size()), nullptr, nullptr, 0) == CSTR_EQUAL;
 }
 
-size_t FindForward(const std::wstring& text, std::wstring_view key, size_t from, bool matchCase) {
-    if (key.empty() || key.size() > text.size()) {
-        return std::wstring::npos;
+Match FindForward(std::wstring_view text, std::wstring_view key, size_t from, bool matchCase) {
+    if (key.empty() || from > text.size()) {
+        return {};
     }
-    for (size_t i = from; i + key.size() <= text.size(); ++i) {
-        if (MatchAt(text, i, key, matchCase)) {
-            return i;
-        }
+    if (!matchCase) {
+        return FindIgnoreCase(text.substr(from), key, FIND_FROMSTART, from);
     }
-    return std::wstring::npos;
+    const size_t pos = text.find(key, from);
+    return pos == std::wstring_view::npos ? Match{} : Match{pos, key.size()};
 }
 
-size_t FindBackward(const std::wstring& text, std::wstring_view key, size_t before,
-                    bool matchCase) {
-    if (key.empty() || key.size() > text.size() || before < key.size()) {
-        return std::wstring::npos;
+Match FindBackward(std::wstring_view text, std::wstring_view key, size_t before, bool matchCase) {
+    if (key.empty()) {
+        return {};
     }
-    for (size_t i = before - key.size() + 1; i-- > 0;) {
-        if (MatchAt(text, i, key, matchCase)) {
-            return i;
-        }
+    const std::wstring_view window = text.substr(0, before);
+    if (!matchCase) {
+        return FindIgnoreCase(window, key, FIND_FROMEND, 0);
     }
-    return std::wstring::npos;
+    const size_t pos = window.rfind(key);
+    return pos == std::wstring_view::npos ? Match{} : Match{pos, key.size()};
 }
 
-ReplaceAllResult ReplaceAllInText(const std::wstring& text, std::wstring_view key,
+ReplaceAllResult ReplaceAllInText(std::wstring_view text, std::wstring_view key,
                                   std::wstring_view replacement, bool matchCase) {
     ReplaceAllResult result;
     result.text.reserve(text.size());
     size_t pos = 0;
-    while (true) {
-        const size_t found = FindForward(text, key, pos, matchCase);
-        if (found == std::wstring::npos) {
-            break;
-        }
-        result.text.append(text, pos, found - pos);
+    for (Match m = FindForward(text, key, 0, matchCase); m.pos != std::wstring_view::npos;
+         m = FindForward(text, key, pos, matchCase)) {
+        result.text.append(text.substr(pos, m.pos - pos));
         result.text.append(replacement);
-        pos = found + key.size();
+        pos = m.pos + m.length;
         ++result.count;
     }
-    result.text.append(text, pos, std::wstring::npos);
+    result.text.append(text.substr(pos));
     return result;
 }
 
