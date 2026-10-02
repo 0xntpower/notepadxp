@@ -10,7 +10,7 @@ namespace notepadxp::settings {
 
 namespace {
 
-constexpr std::wstring_view kRegistryPath = L"Software\\NotepadXP";
+constexpr wchar_t kRegistryPath[] = L"Software\\NotepadXP";
 
 // Font defaults: Lucida Console 10pt, matching classic Notepad.
 constexpr wchar_t kDefaultFaceName[] = L"Lucida Console";
@@ -19,8 +19,8 @@ constexpr int kDefaultPointSize = 100;  // Tenths of a point.
 // Point-size-to-pixels divisor: 72 points/inch * 10 (pointSize is in tenths).
 constexpr int kPointSizeScale = 720;
 
-constexpr std::wstring_view kDefaultHeader = L"&f";
-constexpr std::wstring_view kDefaultFooter = L"Page &p";
+constexpr wchar_t kDefaultHeader[] = L"&f";
+constexpr wchar_t kDefaultFooter[] = L"Page &p";
 
 // Default margins in locale-native units.
 constexpr int kUsMarginTopBottom = 1000;   // 1.00 in (thousandths of an inch).
@@ -53,7 +53,8 @@ Settings Settings::Load() {
     s.marginTop = s.marginBottom = usMeasurement ? kUsMarginTopBottom : kMetricMarginTopBottom;
     s.marginLeft = s.marginRight = usMeasurement ? kUsMarginLeftRight : kMetricMarginLeftRight;
 
-    const RegistryKey key = RegistryKey::CreateOrOpen(HKEY_CURRENT_USER, kRegistryPath);
+    // Read-only: a first run has no key yet, and Save creates it.
+    const RegistryKey key = RegistryKey::OpenForRead(HKEY_CURRENT_USER, kRegistryPath);
     if (!key.IsValid()) {
         return s;
     }

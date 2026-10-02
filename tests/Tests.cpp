@@ -1357,9 +1357,17 @@ void TestCommandLine() {
         CHECK(p.filePath == L"C:\\My Dir\\notes.txt");
     }
     {
-        // First non-switch token wins; later tokens are ignored.
+        // First non-switch token wins. Later tokens are ignored.
         const auto p = ParseCommandLine(L"notepad.exe one.txt two.txt");
         CHECK(p.filePath == L"one.txt");
+    }
+    {
+        // A quoted program path with blanks, with and without arguments.
+        CHECK(!ParseCommandLine(L"\"C:\\Program Files\\np.exe\"").filePath.has_value());
+        CHECK(!ParseCommandLine(L"\"C:\\Program Files\\np.exe\"  ").filePath.has_value());
+        CHECK(ParseCommandLine(L"\"C:\\Program Files\\np.exe\" a.txt").filePath == L"a.txt");
+        CHECK(ParseCommandLine(L"np.exe\ta.txt").filePath == L"a.txt");
+        CHECK(!ParseCommandLine(L"np.exe   ").filePath.has_value());
     }
 }
 

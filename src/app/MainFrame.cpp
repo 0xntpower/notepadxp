@@ -3,7 +3,7 @@
 #include <optional>
 #include <string>
 
-#include <shellapi.h>  // DragAcceptFiles / DragQueryFileW / DragFinish.
+#include <shellapi.h>  // DragQueryFileW / DragFinish.
 
 #include "Resource.h"
 #include "dialogs/AboutBox.hpp"
@@ -42,7 +42,12 @@ bool MainFrame::RunSetup(const util::ParsedCommandLine& commandLine, int showCmd
     settings_ = settings::Settings::Load();
 
     const HMENU menu = LoadMenuW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(ID_MENUBAR));
-    constexpr DWORD kStyle = WS_OVERLAPPEDWINDOW;
+    // WS_CLIPCHILDREN: the edit and status bar cover the client area, so the
+    // frame never erases underneath them (no flicker on live resize).
+    constexpr DWORD kStyle = WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN;
+    // WS_EX_ACCEPTFILES is all DragAcceptFiles sets: WM_DROPFILES without
+    // loading shell32 at startup (it is delay-loaded for the drop itself).
+    constexpr DWORD kExStyle = WS_EX_ACCEPTFILES;
 
     const bool havePlacement =
         settings_.windowX != CW_USEDEFAULT && settings_.windowY != CW_USEDEFAULT &&
@@ -53,9 +58,9 @@ bool MainFrame::RunSetup(const util::ParsedCommandLine& commandLine, int showCmd
         RECT rect = {settings_.windowX, settings_.windowY,
                      settings_.windowX + settings_.windowWidth,
                      settings_.windowY + settings_.windowHeight};
-        created = Create(nullptr, &rect, L"", kStyle, 0, menu);
+        created = Create(nullptr, &rect, L"", kStyle, kExStyle, menu);
     } else {
-        created = Create(nullptr, nullptr, L"", kStyle, 0, menu);
+        created = Create(nullptr, nullptr, L"", kStyle, kExStyle, menu);
     }
     if (created == nullptr) {
         return false;
@@ -105,7 +110,6 @@ int MainFrame::OnCreate(LPCREATESTRUCT /*createStruct*/) {
         UpdateTitle();
         OnCaretMoved();
     });
-    DragAcceptFiles(TRUE);  // CWindow member: enables WM_DROPFILES for this window.
 
     const bool statusVisible = settings_.statusBar && !settings_.wordWrap;
     if (!statusBar_.Create(m_hWnd, statusVisible)) {

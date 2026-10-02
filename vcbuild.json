@@ -9,13 +9,16 @@
     "output_name": "notepadxp.exe"
   },
 
+  "$perf_note": "Static CRT: no vcruntime/msvcp DLL loads at startup and no VC++ redistributable dependency. comdlg32, shell32, and the ole32/oleaut32 imports ATL drags in, are delay-loaded: nothing calls them until a dialog opens, a file is dropped, or the command line carries arguments. /Gw lets the linker drop unused globals. RTTI is unused (ATL/WTL and std::function work without it). CFG + CET shadow stack harden the binary for a viewer of untrusted files.",
+
   "compiler": {
     "standard": "c++20",
-    "runtime": "dynamic",
+    "runtime": "static",
     "char_set": "unicode",
     "exceptions": true,
-    "rtti": true,
+    "rtti": false,
     "parallel": true,
+    "additional_flags": ["/Gw", "/Zc:inline"],
     "defines": [
       "WIN32_LEAN_AND_MEAN",
       "NOMINMAX",
@@ -32,7 +35,8 @@
       "permissive": false
     },
     "security": {
-      "buffer_checks": true
+      "buffer_checks": true,
+      "control_flow_guard": true
     }
   },
 
@@ -45,13 +49,20 @@
       "comctl32.lib",
       "shell32.lib",
       "advapi32.lib",
-      "winspool.lib",
-      "ole32.lib"
+      "delayimp.lib"
     ],
     "security": {
       "aslr": true,
-      "dep": true
-    }
+      "dep": true,
+      "cfg": true
+    },
+    "additional_flags": [
+      "/DELAYLOAD:comdlg32.dll",
+      "/DELAYLOAD:shell32.dll",
+      "/DELAYLOAD:ole32.dll",
+      "/DELAYLOAD:oleaut32.dll",
+      "/CETCOMPAT"
+    ]
   },
 
   "sources": {
