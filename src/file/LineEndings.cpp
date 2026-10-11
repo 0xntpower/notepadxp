@@ -77,4 +77,69 @@ std::wstring ConvertFromCrlf(std::wstring text, LineEnding target) {
     return text;
 }
 
+void CrlfStream::Feed(std::wstring_view chunk) {
+    for (wchar_t c : chunk) {
+        if (pendingCr_) {
+            pendingCr_ = false;
+            if (c == L'\n') {
+                ++crlf_;  // The '\r' already emitted "\r\n"; pair complete.
+                continue;
+            }
+            ++cr_;  // The emitted "\r\n" was a lone-CR break.
+        }
+        if (c == L'\0') {
+            c = L' ';
+        }
+        if (c == L'\r') {
+            out_->append(L"\r\n");  // Correct for lone CR and CRLF alike.
+            pendingCr_ = true;
+        } else if (c == L'\n') {
+            ++lf_;
+            out_->append(L"\r\n");
+        } else {
+            out_->push_back(c);
+        }
+    }
+}
+
+void CrlfStream::Finish() {
+    if (pendingCr_) {
+        pendingCr_ = false;
+        ++cr_;
+    }
+}
+
+LineEnding CrlfStream::Detected() const {
+    if (crlf_ >= lf_ && crlf_ >= cr_) {
+        return LineEnding::Crlf;  // Also the tie / no-newline default.
+    }
+    return lf_ >= cr_ ? LineEnding::Lf : LineEnding::Cr;
+}
+
+void RestoreStream::Feed(std::wstring_view chunk) {
+    const wchar_t replacement = target_ == LineEnding::Lf ? L'\n' : L'\r';
+    for (wchar_t c : chunk) {
+        if (pendingCr_) {
+            pendingCr_ = false;
+            if (c == L'\n') {
+                out_->push_back(replacement);  // The pair completes.
+                continue;
+            }
+            out_->push_back(L'\r');  // Lone CR passes through.
+        }
+        if (c == L'\r') {
+            pendingCr_ = true;  // Decide once the successor arrives.
+        } else {
+            out_->push_back(c);  // Lone LF and plain text pass through.
+        }
+    }
+}
+
+void RestoreStream::Finish() {
+    if (pendingCr_) {
+        pendingCr_ = false;
+        out_->push_back(L'\r');
+    }
+}
+
 } // namespace notepadxp::file

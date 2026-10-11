@@ -185,7 +185,87 @@ std::wstring DecodeText(const std::byte* data, size_t size, TextEncoding encodin
     }
 }
 
-std::vector<std::byte> EncodeText(std::wstring_view text, TextEncoding encoding, bool& lossy) {
+size_t BomLength(const std::byte* data, size_t size, TextEncoding encoding) {
+    switch (encoding) {
+        case TextEncoding::Utf16Le:
+            return HasUtf16LeBom(data, size) ? kUtf16BomLength : 0;
+        case TextEncoding::Utf16Be:
+            return HasUtf16BeBom(data, size) ? kUtf16BomLength : 0;
+        case TextEncoding::Utf8:
+            return HasUtf8Bom(data, size) ? kUtf8BomLength : 0;
+        case TextEncoding::Ansi:
+        default:
+            return 0;
+    }
+}
+
+size_t DecodeChunk(const std::byte* data, size_t available, size_t maxBytes,
+                   TextEncoding encoding, std::wstring& sink) {
+    size_t bytes = maxBytes < available ? maxBytes : available;
+    switch (encoding) {
+        case TextEncoding::Utf16Le:
+        case TextEncoding::Utf16Be: {
+            bytes &= ~size_t{1};  // Never split a UTF-16 code unit.
+            if (bytes == 0) {
+                // A single trailing byte cannot form a code unit; consume it
+                // (emitting nothing), matching DecodeUtf16's floor division.
+                return available > 0 ? 1 : 0;
+            }
+            const size_t units = bytes / sizeof(wchar_t);
+            const size_t base = sink.size();
+            sink.resize(base + units);
+            wchar_t* out = sink.data() + base;
+            if (encoding == TextEncoding::Utf16Le) {
+                std::memcpy(out, data, bytes);
+            } else {
+                const auto* src = reinterpret_cast<const unsigned short*>(data);
+                for (size_t i = 0; i < units; ++i) {
+                    out[i] = static_cast<wchar_t>(_byteswap_ushort(src[i]));
+                }
+            }
+            return bytes;
+        }
+        case TextEncoding::Utf8:
+        case TextEncoding::Ansi:
+        default: {
+            if (bytes == 0) {
+                return 0;
+            }
+            if (bytes < available) {
+                // Keep the final multi-byte character whole. Back off over
+                // UTF-8 continuation bytes, then over a lead byte left at the
+                // boundary (its sequence is split across chunks), or over a
+                // trailing DBCS lead byte. The one-byte floor guarantees
+                // progress; sequences span at most 4 bytes, so chunk sizes
+                // >= 4 never hit it.
+                if (encoding == TextEncoding::Utf8) {
+                    while (bytes > 0 &&
+                           (static_cast<uint8_t>(data[bytes - 1]) & kContinuationMask) ==
+                               kContinuationTag) {
+                        --bytes;
+                    }
+                    if (bytes > 0 && static_cast<uint8_t>(data[bytes - 1]) >= kHighBit) {
+                        --bytes;  // Lead byte at the boundary: split sequence.
+                    }
+                    if (bytes == 0) {
+                        bytes = 1;
+                    }
+                } else if (bytes > 1 && IsDBCSLeadByte(static_cast<BYTE>(data[bytes - 1]))) {
+                    --bytes;  // DBCS lead byte at the boundary: split pair.
+                }
+            }
+            const size_t base = sink.size();
+            sink.resize(base + bytes);  // At most one wchar per input byte.
+            const int wide = MultiByteToWideChar(
+                encoding == TextEncoding::Utf8 ? CP_UTF8 : CP_ACP, 0, AsChars(data),
+                static_cast<int>(bytes), sink.data() + base, static_cast<int>(bytes));
+            sink.resize(base + (wide > 0 ? static_cast<size_t>(wide) : 0));
+            return bytes;
+        }
+    }
+}
+
+std::vector<std::byte> EncodeChunk(std::wstring_view text, TextEncoding encoding, bool& lossy) {
     lossy = false;
     std::vector<std::byte> out;
 
@@ -194,10 +274,8 @@ std::vector<std::byte> EncodeText(std::wstring_view text, TextEncoding encoding,
         case TextEncoding::Utf16Be: {
             // x64 is little-endian: LE is a straight copy, BE a per-unit swap.
             const bool bigEndian = encoding == TextEncoding::Utf16Be;
-            out.resize(kUtf16BomLength + text.size() * sizeof(wchar_t));
-            out[0] = bigEndian ? kUtf16BeBom0 : kUtf16LeBom0;
-            out[1] = bigEndian ? kUtf16BeBom1 : kUtf16LeBom1;
-            std::byte* units = out.data() + kUtf16BomLength;
+            out.resize(text.size() * sizeof(wchar_t));
+            std::byte* units = out.data();
             if (bigEndian) {
                 for (size_t i = 0; i < text.size(); ++i) {
                     const unsigned short unit =
@@ -210,18 +288,14 @@ std::vector<std::byte> EncodeText(std::wstring_view text, TextEncoding encoding,
             return out;
         }
         case TextEncoding::Utf8: {
-            out.push_back(kUtf8Bom0);
-            out.push_back(kUtf8Bom1);
-            out.push_back(kUtf8Bom2);
             if (!text.empty()) {
                 const int needed = WideCharToMultiByte(CP_UTF8, 0, text.data(),
                                                        static_cast<int>(text.size()), nullptr, 0,
                                                        nullptr, nullptr);
                 if (needed > 0) {
-                    const size_t base = out.size();
-                    out.resize(base + static_cast<size_t>(needed));
+                    out.resize(static_cast<size_t>(needed));
                     WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()),
-                                        reinterpret_cast<char*>(out.data() + base), needed, nullptr,
+                                        reinterpret_cast<char*>(out.data()), needed, nullptr,
                                         nullptr);
                     // reinterpret_cast: writing the converted bytes into our buffer.
                 }
@@ -257,14 +331,41 @@ std::vector<std::byte> EncodeText(std::wstring_view text, TextEncoding encoding,
             }
             if (written <= 0 || usedDefault != FALSE) {
                 // Lossy, or a code page that rejects the strict flags (UTF-8 ACP).
-                written = WideCharToMultiByte(CP_ACP, 0, text.data(), len, bytes, needed, nullptr,
-                                              nullptr);
+                written = WideCharToMultiByte(CP_ACP, 0, text.data(), len, bytes, needed,
+                                              nullptr, nullptr);
             }
             out.resize(written > 0 ? static_cast<size_t>(written) : 0);
             lossy = usedDefault != FALSE;
             return out;
         }
     }
+}
+
+std::vector<std::byte> EncodeText(std::wstring_view text, TextEncoding encoding, bool& lossy) {
+    bool chunkLossy = false;
+    std::vector<std::byte> body = EncodeChunk(text, encoding, chunkLossy);
+
+    std::vector<std::byte> out;
+    switch (encoding) {
+        case TextEncoding::Utf16Le:
+        case TextEncoding::Utf16Be:
+            out.reserve(kUtf16BomLength + body.size());
+            out.push_back(encoding == TextEncoding::Utf16Be ? kUtf16BeBom0 : kUtf16LeBom0);
+            out.push_back(encoding == TextEncoding::Utf16Be ? kUtf16BeBom1 : kUtf16LeBom1);
+            break;
+        case TextEncoding::Utf8:
+            out.reserve(kUtf8BomLength + body.size());
+            out.push_back(kUtf8Bom0);
+            out.push_back(kUtf8Bom1);
+            out.push_back(kUtf8Bom2);
+            break;
+        case TextEncoding::Ansi:
+        default:
+            break;
+    }
+    out.insert(out.end(), body.begin(), body.end());
+    lossy = chunkLossy;
+    return out;
 }
 
 } // namespace notepadxp::file

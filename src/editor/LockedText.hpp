@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 
+#include "editor/FastEdit.hpp"
 #include "util/WinLean.hpp"
 
 namespace notepadxp::editor {
@@ -18,6 +19,15 @@ namespace notepadxp::editor {
 class LockedText final {
 public:
     explicit LockedText(HWND edit) {
+        // FastEdit hands out its live buffer through the private view message.
+        if (const UINT viewMessage = FastEditViewMessage(); viewMessage != 0) {
+            FastEditView view{};
+            if (SendMessageW(edit, viewMessage, 0, reinterpret_cast<LPARAM>(&view)) != FALSE &&
+                view.data != nullptr) {
+                view_ = std::wstring_view(view.data, view.length);
+                return;
+            }
+        }
         const auto length = static_cast<size_t>(GetWindowTextLengthW(edit));
         const auto handle = reinterpret_cast<HLOCAL>(SendMessageW(edit, EM_GETHANDLE, 0, 0));
         if (handle != nullptr && LocalSize(handle) >= (length + 1) * sizeof(wchar_t)) {

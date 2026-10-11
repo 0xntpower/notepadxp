@@ -25,6 +25,7 @@ public:
     [[nodiscard]] bool AskReloadChanged(const std::wstring& fileName,
                                         bool bufferModified) override;
     void ReportError(Error error, const std::wstring& fileName) override;
+    void PumpLoadProgress(const std::wstring& fileName, file::LoadProgressShared& shared) override;
 
 private:
     HWND owner_ = nullptr;

@@ -19,6 +19,7 @@
 #include "editor/DocumentShadow.cpp"
 #include "editor/EditKeyHandler.cpp"
 #include "editor/EditView.cpp"
+#include "editor/FastEdit.cpp"
 #include "editor/SearchEngine.cpp"
 #include "editor/UndoManager.cpp"
 #include "file/Encoding.cpp"
@@ -206,16 +207,16 @@ int wmain(int argc, wchar_t** argv) {
             LARGE_INTEGER t = Now();
             auto loaded = LoadTextFile(benchFile, std::nullopt);
             Row(label, "detect+decode", MsSince(t), "ms");
+            // The load returns CRLF-normalized text plus the detected ending.
             Verify(loaded.status == LoadStatus::Ok && loaded.encoding == c.encoding &&
-                       loaded.text == *c.text,
+                       loaded.text == NormalizeToCrlf(*c.text),
                    "encoding round-trip");
+            const auto ending = loaded.lineEnding;
             t = Now();
-            const auto ending = DetectLineEnding(loaded.text);
-            std::wstring normalized = NormalizeToCrlf(std::move(loaded.text));
-            Row(label, "line endings", MsSince(t), "ms");
+            Row(label, "line endings (streamed in load)", MsSince(t), "ms");
             t = Now();
             const auto saved =
-                EncodeText(ConvertFromCrlf(std::move(normalized), ending), c.encoding, lossy);
+                EncodeText(ConvertFromCrlf(std::move(loaded.text), ending), c.encoding, lossy);
             Row(label, "save: restore+encode", MsSince(t), "ms");
             Verify(saved.size() == bytes.size() + (c.stripBom ? 3 : 0), "save round-trip size");
         }
@@ -243,10 +244,38 @@ int wmain(int argc, wchar_t** argv) {
         const auto replaced = ReplaceAllInText(text, L"info", L"WARN", false);
         Row("replace all (engine)", "ignore case", MsSince(t), "ms");
         Verify(replaced.count > 0 && replaced.text.size() == text.size(), "replace all");
+
+        // The product's save path: streamed restore+encode+write off the
+        // locked buffer, temp file + move. No full copies are held.
+        t = Now();
+        bool lossySave = false;
+        Verify(WriteTextStreamed(benchFile, view.LockText().View(),
+                                 notepadxp::file::LineEnding::Crlf,
+                                  TextEncoding::Utf8, lossySave) ==
+                   notepadxp::file::StreamSaveStatus::Ok,
+               "streamed save 100 MB");
+        Row("save (streamed)", "100 MB -> UTF-8", MsSince(t), "ms");
+        DeleteFileW(benchFile.c_str());
     }
 
-    // --- Word wrap toggle: recreate + the frame's re-layout -------------------
-    {
+    // --- Word wrap / heavy mode ----------------------------------------------
+    if (view.IsHeavyMode()) {
+        // Large document: FastEdit is active. Wrap is refused (the stock
+        // alternative was a >10 s full re-wrap), and a mid-document replace —
+        // ~5 s of line-table rebuild on the stock control — must be fast.
+        Verify(!view.SetWordWrap(true), "wrap refused in heavy mode");
+        Row("heavy word wrap", "refused (no recreate)", 0.0, "ms");
+        const int lines = static_cast<int>(SendMessageW(view.Handle(), EM_GETLINECOUNT, 0, 0));
+        Verify(lines > 1000000, "FastEdit line count sane");
+
+        const int mid = view.TextLength() / 2;
+        const int before = view.TextLength();
+        LARGE_INTEGER t = Now();
+        SendMessageW(view.Handle(), EM_SETSEL, mid, mid + 2);
+        SendMessageW(view.Handle(), EM_REPLACESEL, FALSE, reinterpret_cast<LPARAM>(L"ab"));
+        Row("heavy probe", "EM_REPLACESEL swap 2", MsSince(t), "ms");
+        Verify(view.TextLength() == before, "replace kept length");
+    } else {
         LARGE_INTEGER t = Now();
         Verify(view.SetWordWrap(true), "wrap on");
         view.Layout(client);
@@ -382,6 +411,7 @@ int wmain(int argc, wchar_t** argv) {
     // --- Correctness: the real message path round-trips -----------------------
     {
         view.SetText(L"base");
+        Verify(!view.IsHeavyMode(), "small text returns to the stock control");
         SendMessageW(view.Handle(), EM_SETSEL, 4, 4);
         for (int i = 0; i < 20; ++i) {
             SendMessageW(view.Handle(), WM_CHAR, L'q', 0);

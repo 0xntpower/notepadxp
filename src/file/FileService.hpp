@@ -11,6 +11,7 @@
 #include "file/FilePrompts.hpp"
 #include "file/FileWatcher.hpp"
 #include "file/TextBuffer.hpp"
+#include "file/TextFile.hpp"
 #include "util/WinLean.hpp"
 
 namespace notepadxp::file {
@@ -84,8 +85,15 @@ public:
 private:
     [[nodiscard]] bool CheckSave();  // Prompt-to-save gate; false == user cancelled.
     [[nodiscard]] bool LoadFromPath(const std::wstring& path, std::optional<TextEncoding> forced);
+    /// @brief Worker-thread load behind the progress dialog; joins before
+    ///        applying, so callers stay synchronous.
+    [[nodiscard]] bool LoadFromPathAsync(const std::wstring& path,
+                                         std::optional<TextEncoding> forced);
+    /// @brief Commit a finished load to the buffer/document (shared by the
+    ///        synchronous and asynchronous paths).
+    [[nodiscard]] bool ApplyLoadResult(TextFileLoadResult result, const std::wstring& path);
     [[nodiscard]] bool SaveToPath(const std::wstring& path, TextEncoding encoding);
-    void DetectDocumentLanguage(const std::wstring& text);
+    void DetectDocumentLanguage(std::wstring_view text);
     void NotifyDocumentChanged();
 
     TextBuffer& buffer_;

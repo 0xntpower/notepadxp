@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "editor/DocumentShadow.cpp"
+#include "editor/FastEdit.cpp"
 #include "editor/SearchEngine.cpp"
 #include "editor/UndoManager.cpp"
 #include "file/Encoding.cpp"
@@ -281,6 +282,13 @@ public:
         text += t;  // Disk content: modified flag untouched.
         ++externalAppends;
     }
+    void ReadText(const std::function<void(std::wstring_view)>& read) override {
+        read(text);
+    }
+    std::wstring GetTextPrefix(size_t maxChars) override {
+        return text.substr(0, maxChars);
+    }
+
 
     std::wstring text;
     bool modified = false;
@@ -472,7 +480,10 @@ void TestFileService() {
         CHECK(svc.Save());
         const auto reloaded = LoadTextFile(path, std::nullopt);
         CHECK(reloaded.status == LoadStatus::Ok);
-        CHECK(reloaded.text == unix);  // Original LF bytes preserved on disk.
+        // The load normalizes to CRLF but still detects the LF convention —
+        // together these prove the LF bytes were preserved on disk.
+        CHECK(reloaded.lineEnding == notepadxp::file::LineEnding::Lf);
+        CHECK(reloaded.text == notepadxp::file::NormalizeToCrlf(unix));
         DeleteFileW(path.c_str());
     }
 
@@ -1371,6 +1382,324 @@ void TestCommandLine() {
     }
 }
 
+void TestStreamingEquivalence() {
+    using namespace notepadxp::file;
+
+    // Fixtures covering every break shape, NULs, multi-byte UTF-8 and BOMs.
+    const std::wstring fixtures[] = {
+        L"",
+        L"one",
+        L"a\r\nb\r\nc",
+        L"a\nb\nc\n",
+        L"a\rb\rc\r",
+        L"mixed\r\r\n\n\r\nx",
+        std::wstring(L"nul\0 inside\0\r\n", 15),
+        L"café ☕ 中文\r\nnaïve\n",
+    };
+
+    auto encode = [](const std::wstring& text, TextEncoding enc, bool stripBom) {
+        bool lossy = false;
+        std::vector<std::byte> bytes = EncodeText(text, enc, lossy);
+        if (stripBom && bytes.size() >= 3) {
+            bytes.erase(bytes.begin(), bytes.begin() + 3);
+        }
+        return bytes;
+    };
+
+    struct Enc {
+        const char* name;
+        TextEncoding encoding;
+        bool stripBom;
+    };
+    const Enc encodings[] = {
+        {"ansi", TextEncoding::Ansi, false},
+        {"utf8", TextEncoding::Utf8, false},
+        {"utf8-nobom", TextEncoding::Utf8, true},
+        {"utf16le", TextEncoding::Utf16Le, false},
+        {"utf16le-odd", TextEncoding::Utf16Le, true},  // Forced over odd bytes too.
+        {"utf16be", TextEncoding::Utf16Be, false},
+    };
+
+    for (const Enc& enc : encodings) {
+        for (const std::wstring& raw : fixtures) {
+            // Skip ANSI with characters it cannot represent (system ACP).
+            if (enc.encoding == TextEncoding::Ansi) {
+                bool representable = true;
+                for (const wchar_t c : raw) {
+                    if (static_cast<unsigned short>(c) > 0x7F) {
+                        representable = false;
+                        break;
+                    }
+                }
+                if (!representable) {
+                    continue;
+                }
+            }
+            const std::vector<std::byte> bytes = encode(raw, enc.encoding, enc.stripBom);
+
+            // The one-shot pipeline the streaming load replaced.
+            const std::wstring decoded = DecodeText(bytes.data(), bytes.size(), enc.encoding);
+            const LineEnding ending = DetectLineEnding(decoded);
+            const std::wstring expected = NormalizeToCrlf(decoded);
+
+            // Chunked: sizes that can split lines and UTF-16 units but are
+            // large enough to keep every multi-byte sequence whole (a chunk
+            // smaller than a sequence must emit a replacement character to
+            // guarantee progress; production chunks are 4 MiB).
+            const bool byteEncoding = enc.encoding == TextEncoding::Utf8 ||
+                                      enc.encoding == TextEncoding::Ansi;
+            for (size_t chunk = byteEncoding ? 4 : 2; chunk <= 9; ++chunk) {
+                std::wstring out;
+                out.reserve(bytes.size());
+                CrlfStream normalizer(out);
+                std::wstring scratch;
+                size_t pos = BomLength(bytes.data(), bytes.size(), enc.encoding);
+                const size_t bom = pos;
+
+                while (pos < bytes.size()) {
+                    scratch.clear();
+                    const size_t used =
+                        DecodeChunk(bytes.data() + pos, bytes.size() - pos, chunk,
+                                    enc.encoding, scratch);
+                    CHECK(used > 0 || pos > bom);
+                    if (used == 0) {
+                        break;
+                    }
+                    normalizer.Feed(scratch);
+                    pos += used;
+                }
+                normalizer.Finish();
+                CHECK(out == expected);
+                CHECK(normalizer.Detected() == ending);
+            }
+        }
+    }
+}
+
+void TestWriteTextStreamed() {
+    using namespace notepadxp::file;
+
+    const std::wstring path = TempFilePath(L"notepadxp_stream_save.txt");
+    const std::wstring texts[] = {
+        L"",
+        L"plain",
+        L"a\r\nb\r\nc",
+        L"pair \xD83D\xDE00 end\r\nemoji \xD83D\xDE00\xD83D\xDE00 tail",
+        L"line1\r\nline2\r\nno-trailing",
+    };
+
+    for (const int encIdx : {0, 1, 2, 3}) {
+        const auto encoding = static_cast<TextEncoding>(encIdx);
+        for (const LineEnding target : {LineEnding::Crlf, LineEnding::Lf, LineEnding::Cr}) {
+            for (const std::wstring& control : texts) {
+                if (encoding == TextEncoding::Ansi) {
+                    bool ok = true;
+                    for (const wchar_t c : control) {
+                        if (static_cast<unsigned short>(c) > 0x7F) {
+                            ok = false;
+                        }
+                    }
+                    if (!ok) {
+                        continue;  // System ACP cannot represent emoji.
+                    }
+                }
+                bool lossyStream = false;
+                bool lossyOneShot = false;
+                CHECK(WriteTextStreamed(path, control, target, encoding, lossyStream) ==
+                      StreamSaveStatus::Ok);
+
+                // Round-trip: reload and verify the on-disk convention was
+                // restored (the load re-normalizes to CRLF, so compare the
+                // normalized forms and the detected ending).
+                const std::wstring expectedText = NormalizeToCrlf(ConvertFromCrlf(control, target));
+                (void)EncodeText(ConvertFromCrlf(control, target), encoding, lossyOneShot);
+                const auto reloaded = LoadTextFile(path, std::nullopt);
+                CHECK(reloaded.status == LoadStatus::Ok);
+                CHECK(reloaded.text == expectedText);
+                // The ending is only observable when the text had breaks.
+                const bool hasBreaks = control.find_first_of(L"\r\n") != std::wstring::npos;
+                CHECK(!hasBreaks || reloaded.lineEnding == target);
+                CHECK(lossyStream == lossyOneShot);
+
+                // No temp litter next to the target.
+                const std::wstring temp = path + L".nxpsave-";
+                WIN32_FIND_DATAW find{};
+                const HANDLE handle =
+                    FindFirstFileW((path + L".nxpsave-*").c_str(), &find);
+                if (handle != INVALID_HANDLE_VALUE) {
+                    CHECK(wcsncmp(find.cFileName, temp.c_str(), temp.size()) != 0);
+                    FindClose(handle);
+                }
+            }
+        }
+    }
+
+    // Declined lossy save leaves the target untouched and reports Aborted.
+    // Whether ANSI is lossy depends on the system code page; both paths are
+    // asserted against the one-shot EncodeText verdict.
+    {
+        bool lossyOneShot = false;
+        const std::wstring snowman = L"\x2603";
+        (void)EncodeText(snowman, TextEncoding::Ansi, lossyOneShot);
+        const std::wstring target = TempFilePath(L"notepadxp_stream_keep.txt");
+        bool lossy = false;
+        CHECK(WriteAllBytes(target, EncodeText(L"old", TextEncoding::Utf8, lossy)) ==
+              SaveStatus::Ok);
+        bool asked = false;
+        const StreamSaveStatus status = WriteTextStreamed(
+            target, snowman, LineEnding::Crlf, TextEncoding::Ansi, lossy,
+            [&asked] {
+                asked = true;
+                return false;  // Decline the lossy save.
+            });
+        if (lossyOneShot) {
+            CHECK(status == StreamSaveStatus::Aborted);
+            CHECK(asked);
+            const auto reloaded = LoadTextFile(target, std::nullopt);
+            CHECK(reloaded.status == LoadStatus::Ok && reloaded.text == L"old");
+        } else {
+            CHECK(status == StreamSaveStatus::Ok);
+            CHECK(!asked);
+        }
+    }
+    DeleteFileW(TempFilePath(L"notepadxp_stream_keep.txt").c_str());
+    DeleteFileW(path.c_str());
+}
+
+void TestFastEditDoc() {
+    using notepadxp::editor::FastEditDoc;
+
+    FastEditDoc doc;
+    doc.SetText(L"alpha\r\nbeta\ngamma\rdelta");
+    CHECK(doc.LineCount() == 4);
+    CHECK(doc.LineStart(0) == 0);
+    CHECK(doc.LineStart(1) == 7);
+    CHECK(doc.LineStart(2) == 12);
+    CHECK(doc.LineStart(3) == 18);
+    CHECK(doc.LineStart(4) == -1);
+    CHECK(doc.LineFromChar(0) == 0);
+    CHECK(doc.LineFromChar(6) == 0);
+    CHECK(doc.LineFromChar(7) == 1);
+    CHECK(doc.LineFromChar(17) == 2);
+    CHECK(doc.LineFromChar(18) == 3);
+    CHECK(doc.LineFromChar(9999) == 3);
+    CHECK(doc.LineFromChar(-1) == 3);
+    CHECK(doc.LineLength(0) == 5);   // Excludes CRLF.
+    CHECK(doc.LineLength(7) == 4);   // Excludes LF.
+    CHECK(doc.LineLength(18) == 5);  // Last line, no break.
+    CHECK(doc.LineText(1) == L"beta");
+    CHECK(doc.BreakLength(5) == 2);  // CRLF.
+    CHECK(doc.BreakLength(11) == 1); // Lone LF.
+    CHECK(doc.BreakLength(4) == 0);
+
+    // Splice: insert with breaks in the middle.
+    doc.Splice(5, 2, L"\n");  // CRLF -> LF on line 1.
+    CHECK(doc.Text() == L"alpha\nbeta\ngamma\rdelta");
+    CHECK(doc.LineCount() == 4);
+    CHECK(doc.LineStart(1) == 6);
+
+    doc.Splice(5, 1, L"x\r\n\r\ny\n");  // Multi-break insert at a break.
+    CHECK(doc.Text() == L"alphax\r\n\r\ny\nbeta\ngamma\rdelta");
+    CHECK(doc.LineCount() == 6);
+    CHECK(doc.LineStart(5) == 23);
+    CHECK(doc.LineText(0) == L"alphax");
+    CHECK(doc.LineText(1) == L"");
+    CHECK(doc.LineText(2) == L"y");
+
+    // Splice: remove across breaks merges lines. [5, 15) removes
+    // "x\r\n\r\ny\nbet", leaving "alpha" + "a\ngamma\rdelta".
+    doc.Splice(5, 10, L"");
+    CHECK(doc.Text() == L"alphaa\ngamma\rdelta");
+    CHECK(doc.LineCount() == 3);
+    CHECK(doc.LineStart(1) == 7);
+    CHECK(doc.LineFromChar(7) == 1);
+
+    // Append at the very end.
+    doc.Splice(doc.Length(), 0, L"\r\ntail");
+    CHECK(doc.Text() == L"alphaa\ngamma\rdelta\r\ntail");
+
+    // Empty document.
+    doc.SetText(L"");
+    CHECK(doc.LineCount() == 1);
+    CHECK(doc.LineStart(0) == 0);
+    CHECK(doc.LineLength(0) == 0);
+    doc.Splice(0, 0, L"a");
+    CHECK(doc.Text() == L"a");
+    CHECK(doc.LineCount() == 1);
+
+    // Brute-force index agreement over a splice sequence.
+    doc.SetText(L"l1\r\nl2\r\nl3\r\nl4\r\nl5");
+    doc.Splice(3, 8, L"XX\nYY");   // Middle rewrite.
+    doc.Splice(0, 0, L"\n");       // Break at the very start.
+    doc.Splice(doc.Length(), 0, L"z");  // Tail append, no break.
+    // Brute-force: rebuild the expected start-of-line list from the text and
+    // compare it against the maintained index.
+    const std::wstring& text = doc.Text();
+    std::vector<size_t> expectStarts{0};
+    for (size_t i = 0; i < text.size();) {
+        if (text[i] == L'\r') {
+            const size_t next =
+                i + 1 < text.size() && text[i + 1] == L'\n' ? i + 2 : i + 1;
+            expectStarts.push_back(next);
+            i = next;
+        } else if (text[i] == L'\n') {
+            expectStarts.push_back(i + 1);
+            ++i;
+        } else {
+            ++i;
+        }
+    }
+    CHECK(doc.LineCount() == static_cast<int>(expectStarts.size()));
+    for (size_t i = 0; i < expectStarts.size(); ++i) {
+        CHECK(doc.LineStart(static_cast<int>(i)) == static_cast<int>(expectStarts[i]));
+    }
+}
+
+void TestAsyncLoadAndCancel() {
+    using namespace notepadxp::file;
+
+    const std::wstring path = TempFilePath(L"notepadxp_async_big.log");
+    {
+        std::wstring text;
+        text.reserve(17u << 20);
+        while (text.size() < (17u << 20)) {
+            text += L"2026-10-11 10:00:00.000 INFO scheduler - tick\r\n";
+        }
+        bool lossy = false;
+        CHECK(WriteAllBytes(path, EncodeText(text, TextEncoding::Ansi, lossy)) ==
+              SaveStatus::Ok);
+    }
+
+    // The load itself cancels cleanly from the progress hook.
+    {
+        LoadHooks hooks;
+        hooks.chunkBytes = 1 << 20;
+        int calls = 0;
+        hooks.progress = [&calls](size_t done, size_t total) {
+            ++calls;
+            CHECK(total >= (17u << 20));
+            CHECK(done <= total);
+            return false;  // Cancel immediately.
+        };
+        const auto result = LoadTextFile(path, std::nullopt, hooks);
+        CHECK(result.status == LoadStatus::Cancelled);
+        CHECK(calls >= 1);
+    }
+
+    // FileService loads the >16 MiB document through the worker + pump seam.
+    {
+        FakeTextBuffer buffer;
+        FakePrompts prompts;
+        DocumentState doc;
+        FileService svc(buffer, doc, prompts);
+        CHECK(svc.OpenPath(path));
+        CHECK(doc.lineEnding == LineEnding::Crlf);
+        CHECK(buffer.text.size() > (17u << 20));
+        CHECK(buffer.TextLength() > 0);
+    }
+    DeleteFileW(path.c_str());
+}
+
 } // namespace
 
 int main() {
@@ -1389,6 +1718,10 @@ int main() {
     TestBraceMatch();
     TestCommentToggle();
     TestJsonFormat();
+    TestStreamingEquivalence();
+    TestWriteTextStreamed();
+    TestFastEditDoc();
+    TestAsyncLoadAndCancel();
     std::printf("notepadxp tests: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

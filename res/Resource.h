@@ -11,9 +11,9 @@
 
 // --- Version ---------------------------------------------------------------
 // The one place the version is set. Notepad.rc builds VERSIONINFO from it and
-// the About box shows NOTEPADXP_VERSION_STRING ("0.1.0").
+// the About box shows NOTEPADXP_VERSION_STRING ("0.2.0").
 #define NOTEPADXP_VERSION_MAJOR 0
-#define NOTEPADXP_VERSION_MINOR 1
+#define NOTEPADXP_VERSION_MINOR 2
 #define NOTEPADXP_VERSION_PATCH 0
 
 #define NOTEPADXP_STRINGIZE_(x) #x
@@ -145,6 +145,9 @@
 #define IDS_JSONERR             46
 #define IDS_RELOAD              47
 #define IDS_RELOADMOD           48
+#define IDS_OPENING             49
+#define IDS_CANCELLING          50
+#define IDS_CANCEL              51
 #define IDS_TEXT_FRIENDLY_NAME  469
 
 // --- Context-help IDs ------------------------------------------------------

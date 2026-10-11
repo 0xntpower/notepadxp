@@ -9,6 +9,7 @@
 #include "WtlIncludes.hpp"
 #include "editor/DocumentShadow.hpp"
 #include "editor/EditKeyHandler.hpp"
+#include "editor/FastEdit.hpp"
 #include "editor/LockedText.hpp"
 #include "editor/UndoManager.hpp"
 #include "file/TextBuffer.hpp"
@@ -20,6 +21,11 @@ namespace notepadxp::editor {
 /// @brief Owns and drives the child Edit control: creation, font, word-wrap
 ///        recreation, the clipboard/undo commands, and caret position queries.
 ///        Adapts file::TextBuffer, so the file lifecycle can run against it.
+///
+/// Documents at/above kHeavyTextChars swap the stock EDIT control for the
+/// FastEdit control (same message contract, virtualized rendering): the stock
+/// control's line-table rebuild costs seconds per structural edit at that
+/// size. Heavy mode forces word wrap off.
 /// @threadsafety Not thread-safe; lives on and is used from the UI thread only.
 ///
 /// Word wrap cannot be toggled on a live Edit control, so SetWordWrap()
@@ -31,6 +37,15 @@ public:
 
     EditView(const EditView&) = delete;
     EditView& operator=(const EditView&) = delete;
+
+    /// @brief Text size (wchar_t count) at/above which the FastEdit control
+    ///        is used (8 Mi chars == 16 MiB of text).
+    static constexpr size_t kHeavyTextChars = size_t{8} << 20;
+
+    /// @brief Whether the FastEdit (heavy document) control is active.
+    [[nodiscard]] bool IsHeavyMode() const noexcept {
+        return heavy_;
+    }
 
     /// @brief Create the Edit control as a child of @p parent.
     /// @param wordWrap Initial word-wrap state (omits WS_HSCROLL when true).
@@ -81,6 +96,12 @@ public:
 
     /// @brief Return a copy of the full document text.
     [[nodiscard]] std::wstring GetText() override;
+
+    /// @brief Zero-copy text access for the save path (see TextBuffer).
+    void ReadText(const std::function<void(std::wstring_view)>& read) override;
+
+    /// @brief Cheap document prefix for sniffing (see TextBuffer).
+    [[nodiscard]] std::wstring GetTextPrefix(size_t maxChars) override;
 
     /// @brief Zero-copy view of the document. Release it before editing.
     [[nodiscard]] LockedText LockText() const {
@@ -138,7 +159,13 @@ private:
     void OnPreChange(PendingChange pending);
     [[nodiscard]] std::optional<std::wstring> ComputeEnterReplacement();
 
-    [[nodiscard]] static DWORD StyleFor(bool wordWrap) noexcept;
+    [[nodiscard]] static DWORD StyleFor(bool wordWrap, bool heavy) noexcept;
+    [[nodiscard]] static const wchar_t* ClassNameFor(bool heavy) noexcept;
+    /// @brief Create a fresh child control (stock EDIT or FastEdit) at the
+    ///        live window rect and swap it in (text, font, tabs, modify,
+    ///        selection, key-handler subclass). @return false leaves the
+    ///        previous control in place.
+    [[nodiscard]] bool RecreateControl(bool heavy, bool wordWrap, bool preserveText);
     void ReapplyFont();
     void ApplyTabStops();
     void ApplyDelta(size_t pos, size_t removeLen, const std::wstring& insertText, int selStart,
@@ -159,6 +186,7 @@ private:
     bool wordWrap_ = false;
     bool suppressRecording_ = false;  // True while we change text programmatically.
     HWND parent_ = nullptr;
+    bool heavy_ = false;  // FastEdit control active (large document).
 };
 
 } // namespace notepadxp::editor

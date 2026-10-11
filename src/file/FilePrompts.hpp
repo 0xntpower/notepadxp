@@ -1,12 +1,27 @@
 #pragma once
 
 // FilePrompts.hpp — The seam through which the document lifecycle asks or
-// tells the user. The app satisfies it with message boxes
-// (app::AlertBoxPrompts); tests substitute fakes.
+// tells the user. The app satisfies it with message boxes and the load
+// progress window (app::AlertBoxPrompts); tests substitute fakes.
 
+#include <atomic>
+#include <cstdint>
 #include <string>
 
+#include "util/WinLean.hpp"
+
 namespace notepadxp::file {
+
+/// @brief Live progress of a large-file load, shared between the load worker
+///        and the progress UI. The worker updates the counters and raises
+///        `finished` when done; the UI may raise `cancelRequested` at any
+///        time, which makes the worker abort at the next chunk.
+struct LoadProgressShared {
+    std::atomic<uint64_t> bytesDone{0};
+    std::atomic<uint64_t> bytesTotal{0};
+    std::atomic<bool> cancelRequested{false};
+    std::atomic<bool> finished{false};
+};
 
 /// @brief User decisions and reports the document lifecycle needs. FileService
 ///        decides what to ask; an adapter at this seam does the asking.
@@ -40,6 +55,17 @@ public:
 
     /// @brief Report a failed operation on @p fileName.
     virtual void ReportError(Error error, const std::wstring& fileName) = 0;
+
+    /// @brief A large document is loading on a worker thread: show progress
+    ///        and pump messages until @p shared.finished becomes true (the
+    ///        caller joins the worker after this returns). A cancel affordance
+    ///        sets @p cancelRequested; the worker exits at the next chunk. The
+    ///        default just waits (tests, headless use).
+    virtual void PumpLoadProgress(const std::wstring& /*fileName*/, LoadProgressShared& shared) {
+        while (!shared.finished.load(std::memory_order_acquire)) {
+            Sleep(10);
+        }
+    }
 };
 
 } // namespace notepadxp::file

@@ -1,6 +1,7 @@
 #include "app/AlertBoxPrompts.hpp"
 
 #include "Resource.h"
+#include "app/LoadProgressDialog.hpp"
 #include "util/StringTable.hpp"
 
 namespace notepadxp::app {
@@ -53,6 +54,11 @@ void AlertBoxPrompts::ReportError(Error error, const std::wstring& fileName) {
     }
     util::AlertBox(owner_, util::LoadStr(IDS_NN), util::LoadAndMerge(stringId, fileName),
                    MB_OK | MB_ICONEXCLAMATION);
+}
+
+void AlertBoxPrompts::PumpLoadProgress(const std::wstring& fileName,
+                                       file::LoadProgressShared& shared) {
+    LoadProgressDialog::Run(owner_, fileName, shared);
 }
 
 } // namespace notepadxp::app
