@@ -11,9 +11,9 @@
 
 // --- Version ---------------------------------------------------------------
 // The one place the version is set. Notepad.rc builds VERSIONINFO from it and
-// the About box shows NOTEPADXP_VERSION_STRING ("0.1.0").
+// the About box shows NOTEPADXP_VERSION_STRING ("0.2.0").
 #define NOTEPADXP_VERSION_MAJOR 0
-#define NOTEPADXP_VERSION_MINOR 1
+#define NOTEPADXP_VERSION_MINOR 2
 #define NOTEPADXP_VERSION_PATCH 0
 
 #define NOTEPADXP_STRINGIZE_(x) #x
