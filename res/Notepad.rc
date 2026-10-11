@@ -159,7 +159,10 @@ BEGIN
     IDS_LETTERS         "fFpPtTdDcCrRlL"
     IDS_JSONERR         "Invalid JSON: line %d, column %d"
     IDS_RELOAD          "The %% file has been changed by another program.\n\nDo you want to reload it?"
-    IDS_RELOADMOD       "The %% file has changed on disk.\n\nDo you want to reload it and discard your changes?"
+     IDS_RELOADMOD       "The %% file has changed on disk.\n\nDo you want to reload it and discard your changes?"
+    IDS_OPENING         "Opening %%"
+    IDS_CANCELLING      "Cancelling..."
+    IDS_CANCEL          "Cancel"
 END
 
 /////////////////////////////////////////////////////////////////////////////

@@ -4,8 +4,8 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
-#include <vector>
 
 #include "Resource.h"
 #include "dialogs/EncodingFileDialog.hpp"
@@ -22,6 +22,18 @@ namespace {
 // Text prefix handed to language detection / indent sniffing.
 constexpr size_t kDetectPrefixChars = 64 * 1024;
 
+// Files at/above this size load on a worker thread behind the progress
+// dialog; smaller ones load inline (a dialog would just flash).
+constexpr uint64_t kAsyncLoadBytes = 16ull << 20;
+
+uint64_t FileSizeOnDisk(const std::wstring& path) {
+    WIN32_FILE_ATTRIBUTE_DATA info{};
+    if (GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &info) == FALSE) {
+        return 0;
+    }
+    return (static_cast<uint64_t>(info.nFileSizeHigh) << 32) | info.nFileSizeLow;
+}
+
 // True when the document begins with the classic ".LOG" auto-timestamp marker.
 bool StartsWithLogTag(const std::wstring& text) {
     return text.compare(0, 4, L".LOG") == 0;
@@ -29,9 +41,9 @@ bool StartsWithLogTag(const std::wstring& text) {
 
 } // namespace
 
-void FileService::DetectDocumentLanguage(const std::wstring& text) {
-    const std::wstring_view prefix = std::wstring_view(text).substr(
-        0, std::min(text.size(), kDetectPrefixChars));
+void FileService::DetectDocumentLanguage(std::wstring_view text) {
+    const std::wstring_view prefix =
+        text.substr(0, std::min(text.size(), kDetectPrefixChars));
     document_.language = lang::DetectLanguage(document_.filePath, prefix);
     document_.indentStyle = lang::SniffIndentStyle(prefix, document_.language);
 }
@@ -84,7 +96,9 @@ bool FileService::SaveAs() {
     document_.filePath = result->path;
     document_.untitled = false;
     document_.encoding = result->encoding;
-    DetectDocumentLanguage(buffer_.GetText());  // The new name may change the language.
+    // The new name may change the language; sniff the cheap prefix, not a
+    // full copy of a large document.
+    DetectDocumentLanguage(buffer_.GetTextPrefix(kDetectPrefixChars));
     NotifyDocumentChanged();
     return true;
 }
@@ -165,8 +179,38 @@ bool FileService::CheckSave() {
 }
 
 bool FileService::LoadFromPath(const std::wstring& path, std::optional<TextEncoding> forced) {
-    TextFileLoadResult loaded = LoadTextFile(path, forced);
-    switch (loaded.status) {
+    if (FileSizeOnDisk(path) >= kAsyncLoadBytes) {
+        return LoadFromPathAsync(path, forced);
+    }
+    return ApplyLoadResult(LoadTextFile(path, forced), path);
+}
+
+bool FileService::LoadFromPathAsync(const std::wstring& path,
+                                    std::optional<TextEncoding> forced) {
+    // The decode/normalize pass runs on a worker; the UI thread pumps the
+    // progress dialog through the prompts seam. join() synchronizes the
+    // hand-off, so `result` needs no further guarding.
+    LoadProgressShared shared;
+    TextFileLoadResult result;
+    std::thread worker([&path, forced, &shared, &result]() {
+        LoadHooks hooks;
+        hooks.progress = [&shared](size_t bytesDone, size_t bytesTotal) {
+            shared.bytesDone.store(static_cast<uint64_t>(bytesDone),
+                                   std::memory_order_relaxed);
+            shared.bytesTotal.store(static_cast<uint64_t>(bytesTotal),
+                                    std::memory_order_relaxed);
+            return !shared.cancelRequested.load(std::memory_order_relaxed);
+        };
+        result = LoadTextFile(path, forced, hooks);
+        shared.finished.store(true, std::memory_order_release);
+    });
+    prompts_.PumpLoadProgress(util::PathLeaf(path), shared);
+    worker.join();
+    return ApplyLoadResult(std::move(result), path);
+}
+
+bool FileService::ApplyLoadResult(TextFileLoadResult result, const std::wstring& path) {
+    switch (result.status) {
         case LoadStatus::NotFound:
             // Offer to create a new file with this name (the file-not-found prompt).
             if (prompts_.AskCreateNewFile(util::PathLeaf(path))) {
@@ -187,20 +231,21 @@ bool FileService::LoadFromPath(const std::wstring& path, std::optional<TextEncod
         case LoadStatus::AccessError:
             prompts_.ReportError(FilePrompts::Error::OpenFailed, util::PathLeaf(path));
             return false;
+        case LoadStatus::Cancelled:
+            return false;  // The user aborted from the progress dialog; keep the document.
         case LoadStatus::Ok:
             break;
     }
 
-    // Detect the file's newline style, then normalize to CRLF so the Edit
-    // control renders LF-only (Unix) and CR-only files with real line breaks;
-    // the original style is restored on save.
-    document_.lineEnding = DetectLineEnding(loaded.text);
+    // The text arrives already CRLF-normalized (the Edit control only breaks
+    // lines on CRLF); the detected original convention is restored on save.
+    document_.lineEnding = result.lineEnding;
     document_.filePath = path;
     document_.untitled = false;
-    document_.encoding = loaded.encoding;
-    DetectDocumentLanguage(loaded.text);
-    const bool logTag = StartsWithLogTag(loaded.text);
-    buffer_.SetText(NormalizeToCrlf(std::move(loaded.text)));  // No copy when already CRLF.
+    document_.encoding = result.encoding;
+    DetectDocumentLanguage(result.text);
+    const bool logTag = StartsWithLogTag(result.text);
+    buffer_.SetText(std::move(result.text));
     watcher_.Arm(path);
 
     // ".LOG" files get a timestamp appended at end-of-file on open.
@@ -213,22 +258,29 @@ bool FileService::LoadFromPath(const std::wstring& path, std::optional<TextEncod
 }
 
 bool FileService::SaveToPath(const std::wstring& path, TextEncoding encoding) {
-    // Restore the file's original newline convention (the control holds CRLF).
-    const std::wstring text = ConvertFromCrlf(buffer_.GetText(), document_.lineEnding);
+    // Streamed in chunks straight off the control buffer: no full converted
+    // or encoded copy of a large document is ever held, and the lossy prompt
+    // gates the final move so a declined save leaves the target untouched.
     bool lossy = false;
-    const std::vector<std::byte> bytes = EncodeText(text, encoding, lossy);
-    if (lossy && !prompts_.AskContinueLossySave(util::PathLeaf(path))) {
-        return false;
-    }
+    StreamSaveStatus saved = StreamSaveStatus::CreateError;
+    buffer_.ReadText([&](std::wstring_view text) {
+        saved = WriteTextStreamed(path, text, document_.lineEnding, encoding, lossy,
+                                  [this, &path] {
+                                      return prompts_.AskContinueLossySave(
+                                          util::PathLeaf(path));
+                                  });
+    });
 
-    switch (WriteAllBytes(path, bytes)) {
-        case SaveStatus::CreateError:
+    switch (saved) {
+        case StreamSaveStatus::CreateError:
             prompts_.ReportError(FilePrompts::Error::CreateFailed, util::PathLeaf(path));
             return false;
-        case SaveStatus::WriteError:
+        case StreamSaveStatus::WriteError:
             prompts_.ReportError(FilePrompts::Error::WriteFailed, util::PathLeaf(path));
             return false;
-        case SaveStatus::Ok:
+        case StreamSaveStatus::Aborted:
+            return false;  // The user declined the lossy save; no error box.
+        case StreamSaveStatus::Ok:
             break;
     }
 

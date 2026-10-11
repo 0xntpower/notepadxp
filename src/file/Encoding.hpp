@@ -39,6 +39,27 @@ enum class TextEncoding {
 ///        are replaced with spaces (the Edit control would otherwise truncate).
 [[nodiscard]] std::wstring DecodeText(const std::byte* data, size_t size, TextEncoding encoding);
 
+/// @brief Bytes occupied by a leading BOM of @p encoding in @p data (0 if none
+///        or @p size is too small). The streaming decode path skips this many.
+[[nodiscard]] size_t BomLength(const std::byte* data, size_t size, TextEncoding encoding);
+
+/// @brief Decode one chunk of @p encoding bytes, appending to @p sink.
+///        Splits only at @p encoding character boundaries, so feeding
+///        successive chunks produces exactly DecodeText's output.
+/// @param available Bytes from @p data to the end of the file.
+/// @param maxBytes Upper bound on bytes to decode this call (the actual
+///        boundary may back off a few bytes to keep a multi-byte sequence,
+///        a surrogate-bearing DBCS pair, or a UTF-16 unit whole).
+/// @return Bytes consumed (0 only when @p available is 0).
+size_t DecodeChunk(const std::byte* data, size_t available, size_t maxBytes,
+                   TextEncoding encoding, std::wstring& sink);
+
+/// @brief Encode @p text for writing without a BOM (EncodeText = BOM + this).
+///        Identical lossy semantics to EncodeText; chunked callers OR the
+///        flag across chunks. Must not split a surrogate pair across calls.
+[[nodiscard]] std::vector<std::byte> EncodeChunk(std::wstring_view text, TextEncoding encoding,
+                                                 bool& lossy);
+
 /// @brief Encode wide text for writing, prepending the BOM for @p encoding
 ///        (UTF-16 LE/BE and UTF-8 carry a BOM; ANSI does not).
 /// @param lossy Set to true when an ANSI conversion could not represent some

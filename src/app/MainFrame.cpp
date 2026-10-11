@@ -502,13 +502,19 @@ void MainFrame::UpdateMenuState() {
     enable(M_TOGGLECOMMENT,
            !lang::TraitsFor(fileService_.Document().language).lineComment.empty());
 
-    enable(M_GOTO, !settings_.wordWrap);
+    // Heavy (FastEdit) documents never wrap: Go To works, the wrap toggle is
+    // grayed out, and the checkbox reflects the control's real state.
+    const bool heavy = editView_.IsHeavyMode();
+    enable(M_GOTO, !settings_.wordWrap || heavy);
 
     const bool isJson = fileService_.Document().language == lang::Language::Json;
     enable(M_JSONPRETTY, isJson);
     enable(M_JSONMINIFY, isJson);
 
-    menu.CheckMenuItem(M_WORDWRAP, MF_BYCOMMAND | (settings_.wordWrap ? MF_CHECKED : MF_UNCHECKED));
+    menu.CheckMenuItem(M_WORDWRAP, MF_BYCOMMAND |
+                                       (settings_.wordWrap && !heavy ? MF_CHECKED
+                                                                     : MF_UNCHECKED));
+    enable(M_WORDWRAP, !heavy);
     menu.CheckMenuItem(M_STATUSBAR,
                        MF_BYCOMMAND | (settings_.statusBar ? MF_CHECKED : MF_UNCHECKED));
     enable(M_STATUSBAR, !settings_.wordWrap);

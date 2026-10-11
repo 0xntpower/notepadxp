@@ -9,21 +9,29 @@
 
 namespace notepadxp::editor {
 
-DWORD EditView::StyleFor(bool wordWrap) noexcept {
+DWORD EditView::StyleFor(bool wordWrap, bool heavy) noexcept {
     // ES_NOHIDESEL keeps the selection visible while the modeless Find dialog
     // holds focus. A multiline Edit wraps when WS_HSCROLL is absent and scrolls
     // horizontally when it is present — that single bit is the word-wrap toggle.
     constexpr DWORD kEsStd =
         WS_CHILD | WS_VSCROLL | WS_VISIBLE | ES_MULTILINE | ES_NOHIDESEL;
+    if (heavy) {
+        return kEsStd | WS_HSCROLL;  // FastEdit: no wrap, horizontal scrolling.
+    }
     return wordWrap ? kEsStd : (kEsStd | WS_HSCROLL);
+}
+
+const wchar_t* EditView::ClassNameFor(bool heavy) noexcept {
+    return heavy ? FastEditClassName() : L"EDIT";
 }
 
 bool EditView::Create(HWND parent, bool wordWrap) {
     parent_ = parent;
     wordWrap_ = wordWrap;
+    RegisterFastEdit(GetModuleHandleW(nullptr));  // Idempotent; used in heavy mode.
 
     RECT empty = {0, 0, 0, 0};
-    const HWND created = edit_.Create(parent, &empty, nullptr, StyleFor(wordWrap),
+    const HWND created = edit_.Create(parent, &empty, nullptr, StyleFor(wordWrap, false),
                                       WS_EX_CLIENTEDGE, static_cast<UINT>(ID_EDIT));
     if (created == nullptr) {
         return false;
@@ -37,6 +45,55 @@ bool EditView::Create(HWND parent, bool wordWrap) {
     keyHandler_.SetEnterIndentProvider([this] { return ComputeEnterReplacement(); });
     undo_.Reset();
     shadow_.Reset();
+    return true;
+}
+
+bool EditView::RecreateControl(bool heavy, bool wordWrap, bool preserveText) {
+    if (edit_.m_hWnd == nullptr) {
+        return false;
+    }
+
+    std::wstring text;
+    BOOL modified = FALSE;
+    int selStart = 0;
+    int selEnd = 0;
+    if (preserveText) {
+        text = GetText();
+        modified = edit_.GetModify();
+        edit_.GetSel(selStart, selEnd);
+    }
+
+    // Create at the live size: a zero-width wrapping control would first wrap
+    // the whole document one character per line.
+    RECT bounds = {0, 0, 0, 0};
+    edit_.GetWindowRect(&bounds);
+    ::MapWindowPoints(nullptr, parent_, reinterpret_cast<POINT*>(&bounds), 2);
+    const HWND created = ::CreateWindowExW(
+        WS_EX_CLIENTEDGE, ClassNameFor(heavy), L"", StyleFor(wordWrap, heavy),
+        bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top,
+        parent_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(ID_EDIT)),
+        reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(parent_, GWLP_HINSTANCE)), nullptr);
+    if (created == nullptr) {
+        return false;  // Leave the existing control untouched.
+    }
+
+    keyHandler_.UnsubclassWindow();  // Detach before the old control is destroyed.
+    edit_.DestroyWindow();
+    edit_ = created;
+    keyHandler_.SubclassWindow(edit_.m_hWnd);  // Re-attach to the new control.
+    heavy_ = heavy;
+    wordWrap_ = heavy ? false : wordWrap;
+    edit_.LimitText(0);
+    ReapplyFont();
+    ApplyTabStops();  // The language's tab stops must survive the recreate.
+
+    if (preserveText) {
+        suppressRecording_ = true;  // Re-set text on the new control is not a user edit.
+        edit_.SetWindowText(text.c_str());
+        edit_.SetModify(modified);
+        edit_.SetSel(selStart, selEnd);
+        suppressRecording_ = false;
+    }
     return true;
 }
 
@@ -99,48 +156,13 @@ void EditView::SetFocusToEdit() {
 }
 
 bool EditView::SetWordWrap(bool wordWrap) {
-    if (edit_.m_hWnd == nullptr) {
-        return false;
+    if (edit_.m_hWnd == nullptr || wordWrap == wordWrap_) {
+        return edit_.m_hWnd != nullptr;
     }
-    if (wordWrap == wordWrap_) {
-        return true;
+    if (heavy_) {
+        return false;  // FastEdit has no wrap; the frame disables the toggle.
     }
-
-    // Preserve the document, modify flag and caret across the recreate.
-    const std::wstring text = GetText();
-    const BOOL modified = edit_.GetModify();
-    int selStart = 0;
-    int selEnd = 0;
-    edit_.GetSel(selStart, selEnd);
-
-    // Create at the live size: a zero-width wrapping control would first wrap
-    // the whole document one character per line (over a minute at 10 MB).
-    RECT bounds = {0, 0, 0, 0};
-    edit_.GetWindowRect(&bounds);
-    ::MapWindowPoints(nullptr, parent_, reinterpret_cast<POINT*>(&bounds), 2);
-    CEdit replacement;
-    const HWND created = replacement.Create(parent_, &bounds, nullptr, StyleFor(wordWrap),
-                                            WS_EX_CLIENTEDGE, static_cast<UINT>(ID_EDIT));
-    if (created == nullptr) {
-        return false;  // Leave the existing control untouched.
-    }
-    replacement.LimitText(0);
-
-    keyHandler_.UnsubclassWindow();  // Detach before the old control is destroyed.
-    edit_.DestroyWindow();
-    edit_ = created;
-    keyHandler_.SubclassWindow(edit_.m_hWnd);  // Re-attach to the recreated control.
-    wordWrap_ = wordWrap;
-
-    ReapplyFont();
-    ApplyTabStops();  // The language's tab stops must survive the recreate.
-    suppressRecording_ = true;  // Re-set text on the new control is not a user edit.
-    edit_.SetWindowText(text.c_str());
-    suppressRecording_ = false;
-    edit_.SetModify(modified);
-    edit_.SetSel(selStart, selEnd);
-    edit_.SendMessage(EM_SCROLLCARET);
-    return true;
+    return RecreateControl(false, wordWrap, true);
 }
 
 void EditView::SetLanguageContext(lang::Language language, lang::IndentStyle indentStyle) {
@@ -299,6 +321,11 @@ void EditView::GoToLine(int lineNumber) {
 }
 
 void EditView::Reset() {
+    if (heavy_) {
+        suppressRecording_ = true;
+        (void)RecreateControl(false, wordWrap_, false);  // Failure keeps FastEdit; harmless.
+        suppressRecording_ = false;
+    }
     suppressRecording_ = true;
     edit_.SetWindowText(L"");
     edit_.SetModify(FALSE);
@@ -309,6 +336,12 @@ void EditView::Reset() {
 }
 
 void EditView::SetText(const std::wstring& text) {
+    const bool wantHeavy = text.size() >= kHeavyTextChars;
+    if (wantHeavy != heavy_) {
+        suppressRecording_ = true;
+        (void)RecreateControl(wantHeavy, wordWrap_, false);  // Failure: stock control still works.
+        suppressRecording_ = false;
+    }
     suppressRecording_ = true;
     edit_.SetWindowText(text.c_str());
     edit_.SetModify(FALSE);
@@ -318,9 +351,18 @@ void EditView::SetText(const std::wstring& text) {
     undo_.Reset();
     shadow_.Reset();  // Re-materializes lazily on the first edit.
 }
-
 std::wstring EditView::GetText() {
     return std::wstring(LockText().View());
+}
+
+void EditView::ReadText(const std::function<void(std::wstring_view)>& read) {
+    read(LockText().View());  // The lock is released at the end of the statement.
+}
+
+std::wstring EditView::GetTextPrefix(size_t maxChars) {
+    const LockedText locked(edit_.m_hWnd);
+    const std::wstring_view view = locked.View();
+    return std::wstring(view.substr(0, std::min(view.size(), maxChars)));
 }
 
 void EditView::MoveCaretToEnd() {

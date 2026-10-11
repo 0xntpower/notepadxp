@@ -35,6 +35,15 @@ public:
     /// @brief Append external (on-disk) content at the end without touching
     ///        undo or the modified flag; caret follows the end (follow tail).
     virtual void AppendExternal(std::wstring_view text) = 0;
+
+    /// @brief Visit the full document text without copying it (EditView hands
+    /// out a zero-copy view of the control buffer; must not be edited and
+    /// must not outlive the call).
+    virtual void ReadText(const std::function<void(std::wstring_view)>& read) = 0;
+
+    /// @brief First min(@p maxChars, length) characters of the document —
+    ///        cheap prefix access for sniffing (language detection).
+    [[nodiscard]] virtual std::wstring GetTextPrefix(size_t maxChars) = 0;
 };
 
 } // namespace notepadxp::file

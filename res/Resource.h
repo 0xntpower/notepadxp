@@ -145,6 +145,9 @@
 #define IDS_JSONERR             46
 #define IDS_RELOAD              47
 #define IDS_RELOADMOD           48
+#define IDS_OPENING             49
+#define IDS_CANCELLING          50
+#define IDS_CANCEL              51
 #define IDS_TEXT_FRIENDLY_NAME  469
 
 // --- Context-help IDs ------------------------------------------------------
